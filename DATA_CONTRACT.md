@@ -72,6 +72,8 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "score": 72,                     // 0-100 int (swing-weighted; see scoring doc in build_snapshot.py)
   "spot": 858.35,
   "spot_at_alert": 851.10,         // null if new
+  "change_5d_pct": 3.24,           // ~1-week (5-session) price performance %, from TV Perf.W; null if unavailable
+  "change_5d_usd": 26.94,          // equal dollar-per-share value of change_5d_pct (spot - spot/(1+pct/100)); null if unavailable
   "persist": 4,                    // n out of 5 sessions same-direction net flow (from history)
   "persist_max": 5,
   "flow_5d": 18500000.0,           // signed $, sum of last up-to-5 sessions' net flow

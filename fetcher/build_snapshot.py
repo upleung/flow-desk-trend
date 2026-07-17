@@ -169,7 +169,7 @@ CORE_LIST = sorted(set(CORE_EXCHANGE_GUESS) | set(WATCHLIST))
 TV_COLUMNS = [
     "name", "close", "change", "change_from_open",
     "relative_volume_10d_calc", "market_cap_basic", "SMA20", "SMA50",
-    "earnings_release_next_date",
+    "earnings_release_next_date", "Perf.W",
 ]
 # index positions into the "d" row, named for readability
 _COL = {name: i for i, name in enumerate(TV_COLUMNS)}
@@ -237,6 +237,7 @@ def _row_to_quote(sym_field: str, d: list) -> dict | None:
         "sma20": _num(_COL["SMA20"]),
         "sma50": _num(_COL["SMA50"]),
         "earnings_ts": earnings_ts,
+        "change_5d_pct": _num(_COL["Perf.W"]),   # ~1-week (5-session) price performance, %
     }
 
 
@@ -807,12 +808,22 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         if suggested is not None:
             sw_score = swing_score(persist, persist_max, flow_5d, oi_build,
                                     trend, direction, iv_rank, analysis["cp_skew"])
+            # 5-day price change: % straight from TV's weekly perf, plus the
+            # equal dollar value of that move (spot minus the derived price 5
+            # sessions ago). Both null-safe.
+            p5 = quote.get("change_5d_pct")
+            change_5d_usd = None
+            if isinstance(p5, (int, float)) and isinstance(spot, (int, float)) \
+                    and (1.0 + p5 / 100.0) != 0:
+                change_5d_usd = spot - spot / (1.0 + p5 / 100.0)
             swing_cards.append({
                 "ticker": ticker,
                 "tv_symbol": quote["tv_symbol"],
                 "direction": direction,
                 "score": sw_score,
                 "spot": spot,
+                "change_5d_pct": p5,
+                "change_5d_usd": change_5d_usd,
                 "persist": persist,
                 "persist_max": persist_max,
                 "flow_5d": flow_5d,
