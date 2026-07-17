@@ -72,11 +72,10 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "score": 72,                     // 0-100 int (swing-weighted; see scoring doc in build_snapshot.py)
   "spot": 858.35,
   "spot_at_alert": 851.10,         // null if new
-  "change_5d_pct": 3.24,           // ~1-week (5-session) price performance %, from TV Perf.W; null if unavailable
-  "change_5d_usd": 26.94,          // equal dollar-per-share value of change_5d_pct (spot - spot/(1+pct/100)); null if unavailable
   "persist": 4,                    // n out of 5 sessions same-direction net flow (from history)
   "persist_max": 5,
   "flow_5d": 18500000.0,           // signed $, sum of last up-to-5 sessions' net flow
+  "flow_5d_pct": 62.0,             // flow_5d as % of gross premium (calls+puts) over the same sessions; signed, -100..+100; null if no gross history
   "oi_build": 12000,               // day-over-day sum-OI delta in the flow direction (contracts); null if <2 days history
   "trend": "UP",                   // "UP" | "DOWN" | "MIXED"  (spot vs SMA20/SMA50)
   "iv_rank": 63,                   // 0-100 percentile once >=20 sessions; else null
@@ -111,6 +110,7 @@ string sentinel). All strings are already plain (frontend still escapes on rende
       "MU": {
         "net_flow_0_7": 4250000.0,   // signed
         "sum_oi_0_7": 210000,        // aggregate OI in the flow direction (contracts)
+        "gross_prem_0_7": 10600000.0, // calls+puts premium, 0-7 DTE (denominator for flow_5d_pct)
         "iv30": 0.98,
         "direction": "BULL",
         "first_board_conviction": {"time": "2026-07-16T14:32:00Z", "spot": 851.10},
@@ -123,7 +123,7 @@ string sentinel). All strings are already plain (frontend still escapes on rende
 ```
 Keep max 60 sessions; prune older. `iv_history` keeps max 60 values/name.
 On each cycle: reload history, update today's row (net_flow, sum_oi, iv30, direction),
-set first_board_* only if not already set today, recompute persist/flow_5d/oi_build/iv_rank.
+set first_board_* only if not already set today, recompute persist/flow_5d/flow_5d_pct/oi_build/iv_rank.
 
 ## Symbol hygiene (fetcher)
 Skip TV tickers containing `/`, `.`, `-` (preferred shares, warrants, units).

@@ -169,7 +169,7 @@ CORE_LIST = sorted(set(CORE_EXCHANGE_GUESS) | set(WATCHLIST))
 TV_COLUMNS = [
     "name", "close", "change", "change_from_open",
     "relative_volume_10d_calc", "market_cap_basic", "SMA20", "SMA50",
-    "earnings_release_next_date", "Perf.W",
+    "earnings_release_next_date",
 ]
 # index positions into the "d" row, named for readability
 _COL = {name: i for i, name in enumerate(TV_COLUMNS)}
@@ -237,7 +237,6 @@ def _row_to_quote(sym_field: str, d: list) -> dict | None:
         "sma20": _num(_COL["SMA20"]),
         "sma50": _num(_COL["SMA50"]),
         "earnings_ts": earnings_ts,
-        "change_5d_pct": _num(_COL["Perf.W"]),   # ~1-week (5-session) price performance, %
     }
 
 
@@ -700,6 +699,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         today_sessions[ticker] = {
             "net_flow_0_7": net_flow,
             "sum_oi_0_7": analysis["sum_oi_0_7_directional"],
+            "gross_prem_0_7": analysis["total_premium_0_7"],   # calls+puts prem (for flow_5d %)
             "iv30": analysis["iv30"],
             "direction": direction,
         }
@@ -721,12 +721,26 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                 persist += 1
         persist_max = 5
 
-        # flow_5d = today's net_flow + up to 4 prior sessions' net_flow (5 total)
+        # flow_5d = today's net_flow + up to 4 prior sessions' net_flow (5 total).
+        # flow_5d_pct re-expresses that net dollar flow as a percentage of gross
+        # premium (calls+puts) over the SAME sessions -- i.e. how one-sided the
+        # 5-day flow is (bounded -100..+100). net and gross are summed only over
+        # sessions that carry gross data (today always does; history rows written
+        # before gross_prem_0_7 existed are skipped for the %, so it stays bounded
+        # and self-corrects as gross history fills in).
         flow_5d = net_flow
+        net_for_pct = net_flow
+        gross_for_pct = analysis["total_premium_0_7"] or 0.0
         for d in (last5_dates[-4:] if len(last5_dates) > 4 else last5_dates):
             row = history["sessions"][d].get(ticker)
-            if isinstance(row, dict) and isinstance(row.get("net_flow_0_7"), (int, float)):
+            if not isinstance(row, dict):
+                continue
+            if isinstance(row.get("net_flow_0_7"), (int, float)):
                 flow_5d += row["net_flow_0_7"]
+                if isinstance(row.get("gross_prem_0_7"), (int, float)):
+                    net_for_pct += row["net_flow_0_7"]
+                    gross_for_pct += row["gross_prem_0_7"]
+        flow_5d_pct = (net_for_pct / gross_for_pct * 100.0) if gross_for_pct > 0 else None
 
         # oi_build: today's directional sum_oi minus yesterday's
         oi_build = None
@@ -808,25 +822,16 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         if suggested is not None:
             sw_score = swing_score(persist, persist_max, flow_5d, oi_build,
                                     trend, direction, iv_rank, analysis["cp_skew"])
-            # 5-day price change: % straight from TV's weekly perf, plus the
-            # equal dollar value of that move (spot minus the derived price 5
-            # sessions ago). Both null-safe.
-            p5 = quote.get("change_5d_pct")
-            change_5d_usd = None
-            if isinstance(p5, (int, float)) and isinstance(spot, (int, float)) \
-                    and (1.0 + p5 / 100.0) != 0:
-                change_5d_usd = spot - spot / (1.0 + p5 / 100.0)
             swing_cards.append({
                 "ticker": ticker,
                 "tv_symbol": quote["tv_symbol"],
                 "direction": direction,
                 "score": sw_score,
                 "spot": spot,
-                "change_5d_pct": p5,
-                "change_5d_usd": change_5d_usd,
                 "persist": persist,
                 "persist_max": persist_max,
                 "flow_5d": flow_5d,
+                "flow_5d_pct": flow_5d_pct,
                 "oi_build": oi_build,
                 "trend": trend,
                 "iv_rank": iv_rank,
