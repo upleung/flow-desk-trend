@@ -10,12 +10,17 @@ already done — the remaining human step is noted at the bottom.
       committed on top of the repo's initial commit) and an orphan **`data`** branch
       (real `data.json` + `history.json` from a live fetch on 2026-07-16). Ready to push
       unchanged.
-- [ ] **Pushed to GitHub** — BLOCKED at build time: the Claude session that built this
-      only had access to the `claudevault` repo, so `git push` to `flow-desk` returned
-      403. **This clears the moment the Claude GitHub App is granted access to
-      `flow-desk`** (see "One step left"). A durable copy of everything lives in
-      ClaudeVault at `market-data/flow-desk/repo/` in the meantime.
-- [ ] **Pages "on" + first refresh-loop run** — happens automatically after the push.
+- [x] **Pushed to GitHub** — done 2026-07-16 evening (Claude session, after Zach
+      granted the GitHub App access). `main` + `data` pushed; the ClaudeVault mirror
+      at `market-data/flow-desk/repo/` remains the durable backup.
+- [x] **Pages "on" + first refresh-loop run** — done 2026-07-16 evening. Site live,
+      first forced refresh cycle published real data to the `data` branch.
+      NOTE — deploy method changed during deploy: Pages runs in **branch mode from
+      `gh-pages`** (the workflow token couldn't create a Pages site, and the
+      auto-created github-pages environment rejected `actions/deploy-pages` runs
+      from `main`). `pages.yml` now just syncs `index.html` from `main` onto
+      `gh-pages`; GitHub's built-in "pages build and deployment" publishes it.
+      Don't flip Settings → Pages to "GitHub Actions" — branch mode is intentional.
 
 ## The URL (once Pages finishes its first deploy)
 
@@ -38,30 +43,11 @@ already done — the remaining human step is noted at the bottom.
 
 ## One step left (for a human)
 
-**Grant the Claude GitHub App access to this repo**, then a Claude session pushes it.
+None — deployed 2026-07-16. Kept for history: the step was granting the Claude
+GitHub App access to this repo, then telling a Claude session "deploy flow-desk".
 
-1. Open https://github.com/settings/installations → the Claude / Claude Code app →
-   **Configure** → under "Repository access" add **flow-desk** (or select "All
-   repositories") → Save. (This is the same grant GitHub prompts for when you first
-   point Claude at a new repo.)
-2. Tell any Claude session: **"deploy flow-desk"** — it will `git push origin main`
-   and `git push origin data`. (Or push from your own machine: clone this repo, copy
-   in these files, `git push`.)
-3. The **Deploy Pages** workflow runs automatically on the `main` push and turns Pages
-   on. The **Refresh Loop** starts the data engine.
-
-To light it up immediately after the push (instead of waiting for market open):
-
-1. Go to the repo's **Actions** tab: https://github.com/zlanghamer1/flow-desk/actions
-2. If GitHub asks you to **enable workflows** on this repo, click the button to enable them.
-3. Open **"Refresh Loop"** in the left list → **Run workflow** → tick the **force**
-   box → **Run workflow**. `force` makes it run one cycle immediately even though the
-   market is closed, so you can confirm the `data` branch updates and the site shows data.
-4. The **"Deploy Pages"** workflow should already have run from the `main` push. If the
-   site 404s, open "Deploy Pages" → **Run workflow** once. Then visit the URL above.
-
-If Pages isn't turned on automatically, go to **Settings → Pages** and set the source
-to **GitHub Actions** (not "Deploy from a branch").
+If Pages ever gets turned off: Settings → Pages → source **Deploy from a branch** →
+branch **gh-pages** (root). (Branch mode, not "GitHub Actions" — see Status note.)
 
 ## If the refresh loop ever stops
 
