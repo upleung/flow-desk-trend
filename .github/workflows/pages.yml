@@ -5,6 +5,16 @@ name: Deploy Pages
 # data.json live from the `data` branch's raw content at runtime, so this
 # workflow only ever needs to ship index.html — nothing from fetcher/ or
 # .github/ should end up in the deployed site.
+#
+# HOW IT DEPLOYS (changed 2026-07-16 during first deploy): Pages runs in
+# branch mode from `gh-pages` — this job just copies index.html from main
+# onto that branch, and GitHub's own "pages build and deployment" publishes
+# it. The original actions/deploy-pages route was abandoned because the
+# workflow token can't create a Pages site ("Resource not accessible by
+# integration"), and after Pages was branch-enabled, the auto-created
+# github-pages environment only accepts deployments from gh-pages, which
+# rejected deploy-pages runs from main. Branch mode needs neither admin
+# rights nor environment approval, so it can never wedge like that again.
 
 on:
   push:
@@ -15,43 +25,32 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v5
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - name: Prepare site directory
+      - name: Sync index.html to gh-pages
         run: |
-          mkdir -p _site
-          cp index.html _site/index.html
-
-      - name: Upload site artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          set -euo pipefail
+          git config user.name "flow-desk-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin gh-pages
+          git checkout gh-pages
+          git checkout main -- index.html
+          touch .nojekyll
+          git add index.html .nojekyll
+          if git diff --cached --quiet; then
+            echo "Site unchanged — nothing to publish."
+          else
+            git commit -m "Publish index.html from main (${GITHUB_SHA})"
+            git push origin gh-pages
+          fi
