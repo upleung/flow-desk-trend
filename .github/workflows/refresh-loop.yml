@@ -1,0 +1,121 @@
+name: Refresh Loop
+
+# Self-perpetuating market-hours loop.
+#
+# Design: each firing runs fetcher/loop.py, which cycles roughly every ~7 min,
+# market-guarded, publishing data.json/history.json to the `data` branch on
+# every cycle (single squashed force-push commit — see the "Prepare OUT_DIR"
+# step below). loop.py runs for up to ~5.5h then exits so it stays comfortably
+# under GitHub's 6h hard job cap; if the session is still open at that point it
+# prints a "REDISPATCH" line, and the final step here re-fires this same
+# workflow via the API so the session keeps getting covered all day without a
+# human touching anything. Two backup cron starters (DST + standard time
+# variants of ~8:20am CT, just before the 8:25am CT session open per
+# fetcher/market_guard.py) exist purely as a safety net in case the
+# self-redispatch chain is ever broken by a run failing outright — the primary
+# mechanism is the redispatch chain, not the cron.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run one cycle now bypassing the market-hours guard (for after-hours testing)"
+        type: boolean
+        default: false
+  schedule:
+    # Backup starters only (see note above). UTC times = ~8:20am CT.
+    - cron: "20 13 * * 1-5"   # 08:20 CDT (UTC-5, DST)
+    - cron: "20 14 * * 1-5"   # 08:20 CST (UTC-6, standard time)
+
+permissions:
+  contents: write   # loop.py pushes data.json/history.json to the `data` branch
+  actions: write     # needed to re-dispatch this workflow via `gh workflow run`
+
+concurrency:
+  group: refresh-loop
+  cancel-in-progress: false   # never kill a running cycle mid-publish
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # stay well under GitHub's 360min (6h) hard cap
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "flow-desk-bot"
+          git config user.email "actions@github.com"
+
+      # No pip install — fetcher/loop.py is pure stdlib, runs on the
+      # runner's default python3 (currently 3.12 on ubuntu-latest).
+
+      - name: Prepare OUT_DIR (data branch working copy)
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OUT_DIR="${GITHUB_WORKSPACE}/_data-branch"
+          REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+          if git ls-remote --exit-code --heads "$REMOTE_URL" data >/dev/null 2>&1; then
+            echo "data branch exists — cloning it"
+            git clone --branch data --single-branch "$REMOTE_URL" "$OUT_DIR"
+          else
+            echo "data branch does not exist yet — creating it as an orphan branch"
+            git clone "$REMOTE_URL" "$OUT_DIR"
+            (
+              cd "$OUT_DIR"
+              git checkout --orphan data
+              git rm -rf . >/dev/null 2>&1 || true
+              git commit --allow-empty -m "Initialize data branch"
+              git push "$REMOTE_URL" data
+            )
+          fi
+
+          git -C "$OUT_DIR" config user.name "flow-desk-bot"
+          git -C "$OUT_DIR" config user.email "actions@github.com"
+
+          # Expose OUT_DIR to later steps.
+          echo "OUT_DIR=$OUT_DIR" >> "$GITHUB_ENV"
+
+      - name: Run the refresh loop
+        id: loop
+        env:
+          OUT_DIR: ${{ env.OUT_DIR }}
+          # loop.py's guard-bypass sentinel is documented as env
+          # FORCE_ONE_CYCLE=1 for exactly one cycle. workflow_dispatch's
+          # `force` boolean input is mapped true -> "1", false/absent
+          # (schedule firings have no `inputs` context) -> "0".
+          FORCE_ONE_CYCLE: ${{ inputs.force && '1' || '0' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          python3 fetcher/loop.py 2>&1 | tee loop_output.log
+          if grep -q "^REDISPATCH" loop_output.log; then
+            echo "redispatch=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "redispatch=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Re-dispatch if the session is likely still open
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REDISPATCH: ${{ steps.loop.outputs.redispatch }}
+          # Belt-and-suspenders: even if loop.py somehow emitted REDISPATCH
+          # on a forced test run, never let a `force` after-hours test chain
+          # into a redispatch loop.
+          IS_FORCE: ${{ inputs.force && 'true' || 'false' }}
+        run: |
+          if [ "$REDISPATCH" = "true" ] && [ "$IS_FORCE" != "true" ]; then
+            echo "loop.py signaled REDISPATCH on a real (non-forced) run — re-dispatching refresh-loop.yml."
+            gh workflow run refresh-loop.yml --repo "${{ github.repository }}"
+          else
+            echo "No redispatch needed (redispatch=$REDISPATCH, force=$IS_FORCE)."
+          fi

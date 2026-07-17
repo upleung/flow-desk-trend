@@ -1,0 +1,7 @@
+# Local test artifacts — not part of the published site or the data branch.
+data/
+verify/
+fetcher/.prev_cycle.json
+__pycache__/
+*.pyc
+docs-preview/
