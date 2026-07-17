@@ -145,7 +145,8 @@ FIXED_RR = 3.5
 #   WTI            — CBOE root resolves to W&T Offshore (micro-cap oil E&P),
 #                    NOT crude oil; almost certainly not the intended line
 #   SPX / VIX      — index roots, not the equity/ETF chain this pipeline reads
-#   QQQ / SPMO     — broad-market (not sector); left off to keep the board lean
+#   SPMO           — broad-market momentum ETF, left off to keep the board lean
+#   (QQQ was added back 2026-07-17 at Zach's request — it's below.)
 WATCHLIST = [
     # Zach's canonical picks (vault, 2026-06-10)
     "MU", "CRWD", "COHR", "LLY", "V", "XOM",
@@ -159,6 +160,7 @@ WATCHLIST = [
     "AVGO", "NVDA", "MRVL", "LITE", "CAMT", "ONTO",  # semis / semi-cap
     "GOOGL", "MSFT",              # megacap AI-demand names off his list
     "CVX",                        # Chevron ("CHEV" on his TradingView list)
+    "QQQ",                        # Nasdaq-100 (broad index, Zach's add 2026-07-17)
 ]
 
 # 11 SPDR sector-index ETFs ("sector indexes like xle, xlc, xlp etc.")
