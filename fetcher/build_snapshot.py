@@ -9,20 +9,18 @@ authoritative output schema this module must produce.
 ────────────────────────────────────────────────────────────────────────────
 PIPELINE (letters match the build spec)
 ────────────────────────────────────────────────────────────────────────────
-(a) Two TradingView screens (close>=5, market_cap>=$500M, NASDAQ/NYSE/AMEX):
-    top 150 by relative_volume_10d_calc desc, and the two "change" extremes
-    (top 150 desc + top 150 asc) to catch big gainers AND big losers. Union.
-(b) Union with a static ~65-name CORE_LIST (megacaps/semis/financials/
-    energy/index ETFs/other liquid optionable names) plus the mandatory
-    watchlist (MU, CRWD, COHR, LLY, V, XOM). Core names not already resolved
-    by the screens are looked up via a SELF-HEALING exchange probe (try
-    NASDAQ:, then NYSE:, then AMEX: batch quote calls) rather than a
-    hand-maintained ticker->exchange dict — a live check during
-    development found COHR listed on NYSE, not NASDAQ as an existing
-    vault mapping assumed, so trusting one static dict here would have
-    silently dropped a mandatory watchlist name.
-(c) Pre-score = rvol * |change_pct|; take top MAX_CANDIDATES (40), always
-    keeping every core watchlist name even outside the top 40.
+(a) NO market-wide screen (dropped 2026-07-17 — it dumped dozens of
+    correlated movers onto the boards on rotation days). The universe is a
+    FIXED, curated list: PINNED = WATCHLIST (Zach's canonical picks + the
+    semiconductor/memory names off his TradingView watchlist) + the 11 SPDR
+    sector-index ETFs. See the PINNED definition below.
+(b) Resolve every pinned name to a live TV quote via a SELF-HEALING exchange
+    probe (try NASDAQ:, then NYSE:, then AMEX:, then CBOE: batch quote calls)
+    rather than a hand-maintained ticker->exchange dict — a live check found
+    COHR on NYSE (not NASDAQ) and the memory/semi ETFs DRAM/RAM/SKHX on Cboe
+    BZX, so trusting one static dict would silently drop pinned names.
+(c) No pre-score cut — every resolved pinned name gets a CBOE chain pulled,
+    in PINNED order (the point of the curated list is to show Zach's names).
 (d) Fetch CBOE delayed chain per candidate (0.3s sleep, skip HTTP errors of
     any kind fail-soft — 403/404 both observed live for bad/optionless
     symbols). Parse OCC symbols (root+YYMMDD+C/P+strike*1000, 15 fixed-width
@@ -35,8 +33,9 @@ PIPELINE (letters match the build spec)
     sessions), flow_5d, oi_build, trend (spot vs SMA20/SMA50), iv_rank
     (percentile once >=20 iv30 sessions collected).
 (f) Swing score (see WEIGHTS_SWING below).
-(g) Board membership: conviction = usable 0-7DTE bucket, score desc, top 24.
-    swing = usable suggested_contract, swing-score desc, top 24.
+(g) Board membership: conviction = usable 0-7DTE bucket, score desc.
+    swing = usable suggested_contract, swing-score desc. BOARD_CAP (50) is
+    above the pinned-universe size so no curated name is truncated.
 (h) Alert memory: first_board_conviction/first_board_swing {time, spot} set
     once per ticker per day, read back from history.json.
 (i) Header stats across the union of both boards, deduped by ticker.
@@ -113,9 +112,10 @@ CBOE_SLEEP_SEC = 0.3
 TV_SCAN_URL = "https://scanner.tradingview.com/america/scan"
 CBOE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{sym}.json"
 
-MAX_CANDIDATES = 40
-SCREEN_RANGE = 150
-BOARD_CAP = 24
+# Curated universe (see PINNED below) — every pinned name that has a usable
+# CBOE chain becomes a candidate; the board cap is set high enough that no
+# curated name is ever truncated off a board.
+BOARD_CAP = 50
 MAX_HISTORY_SESSIONS = 60
 MAX_IV_HISTORY = 60
 
@@ -130,41 +130,45 @@ TARGET_MULT = 2.05
 FIXED_RR = 3.5
 
 
-# ── Static core list (mandatory watchlist always included) ─────────────────
-WATCHLIST = ["MU", "CRWD", "COHR", "LLY", "V", "XOM"]
+# ── Curated universe (Zach's ruling 2026-07-17) ────────────────────────────
+# Flow Desk no longer screens the whole market for movers — that dumped dozens
+# of correlated names onto the boards on any rotation day. The universe is now
+# a fixed, deliberate watch: Zach's watchlist (his canonical picks + the
+# semiconductor/memory names off his TradingView watchlist) plus the 11 SPDR
+# sector-index ETFs. Every name below was verified to have a usable US CBOE
+# options chain on 2026-07-17; TV symbol/exchange still self-heals via
+# _resolve_core_tv() (NASDAQ -> NYSE -> AMEX -> CBOE).
+#
+# Deliberately NOT included (verified 2026-07-17, don't silently re-add):
+#   BESIY / IFNNY  — foreign ADRs (BE Semi, Infineon), no US CBOE chain (403)
+#   NRGU           — 3x oil ETN, no listed options (403)
+#   WTI            — CBOE root resolves to W&T Offshore (micro-cap oil E&P),
+#                    NOT crude oil; almost certainly not the intended line
+#   SPX / VIX      — index roots, not the equity/ETF chain this pipeline reads
+#   QQQ / SPMO     — broad-market (not sector); left off to keep the board lean
+WATCHLIST = [
+    # Zach's canonical picks (vault, 2026-06-10)
+    "MU", "CRWD", "COHR", "LLY", "V", "XOM",
+    # Semiconductor / memory cluster off his TradingView watchlist
+    "SMH", "SOXL", "SOXS",        # semi ETFs (broad + 3x bull/bear)
+    "MUU",                        # Direxion 2x Long MU
+    "SKHX",                       # Leverage Shares 2x Long SK Hynix (US-listed proxy)
+    "SNDK",                       # Sandisk
+    "DRAM",                       # Roundhill Memory ETF
+    "RAM",                        # Roundhill T-REX 2x Long DRAM ETF
+    "AVGO", "NVDA", "MRVL", "LITE", "CAMT", "ONTO",  # semis / semi-cap
+    "GOOGL", "MSFT",              # megacap AI-demand names off his list
+    "CVX",                        # Chevron ("CHEV" on his TradingView list)
+]
 
-# Best-effort documentation dict (used only as a first guess / for the
-# report); actual TV symbol resolution self-heals via _resolve_core_tv()
-# below, which probes NASDAQ -> NYSE -> AMEX live rather than trusting this.
-CORE_EXCHANGE_GUESS: dict[str, str] = {
-    # Megacaps
-    "AAPL": "NASDAQ", "MSFT": "NASDAQ", "NVDA": "NASDAQ", "GOOGL": "NASDAQ",
-    "AMZN": "NASDAQ", "META": "NASDAQ", "TSLA": "NASDAQ", "NFLX": "NASDAQ",
-    "AVGO": "NASDAQ",
-    # Semis
-    "MU": "NASDAQ", "AMD": "NASDAQ", "INTC": "NASDAQ", "QCOM": "NASDAQ",
-    "TXN": "NASDAQ", "ARM": "NASDAQ", "SMCI": "NASDAQ", "TSM": "NYSE",
-    "ASML": "NASDAQ", "LRCX": "NASDAQ", "AMAT": "NASDAQ", "MRVL": "NASDAQ",
-    # Financials
-    "JPM": "NYSE", "BAC": "NYSE", "GS": "NYSE", "MS": "NYSE", "WFC": "NYSE",
-    "C": "NYSE", "V": "NYSE", "MA": "NYSE", "AXP": "NYSE",
-    # Energy
-    "XOM": "NYSE", "CVX": "NYSE", "COP": "NYSE", "SLB": "NYSE", "OXY": "NYSE",
-    # Index ETFs
-    "SPY": "AMEX", "QQQ": "NASDAQ", "IWM": "AMEX", "DIA": "AMEX",
-    # Other liquid optionable names
-    "BABA": "NYSE", "PLTR": "NASDAQ", "COIN": "NASDAQ", "HOOD": "NASDAQ",
-    "SOFI": "NASDAQ", "UBER": "NYSE", "DIS": "NYSE", "BA": "NYSE",
-    "CAT": "NYSE", "GE": "NYSE", "WMT": "NYSE", "COST": "NASDAQ",
-    "HD": "NYSE", "LLY": "NYSE", "UNH": "NYSE", "JNJ": "NYSE", "PFE": "NYSE",
-    "KO": "NYSE", "PEP": "NASDAQ", "MCD": "NYSE", "DAL": "NYSE",
-    "AAL": "NASDAQ", "F": "NYSE", "GM": "NYSE", "NKE": "NYSE",
-    "SBUX": "NASDAQ", "CRWD": "NASDAQ", "PANW": "NASDAQ", "SNOW": "NYSE",
-    # Watchlist-only addition not otherwise in the sector lists above
-    "COHR": "NYSE",   # verified live 2026-07-16: NASDAQ:COHR returns 0 rows
-}
+# 11 SPDR sector-index ETFs ("sector indexes like xle, xlc, xlp etc.")
+SECTOR_ETFS = [
+    "XLE", "XLC", "XLP", "XLF", "XLK",
+    "XLV", "XLI", "XLY", "XLB", "XLU", "XLRE",
+]
 
-CORE_LIST = sorted(set(CORE_EXCHANGE_GUESS) | set(WATCHLIST))
+# The full pinned universe — deduped, order-preserving.
+PINNED = list(dict.fromkeys(WATCHLIST + SECTOR_ETFS))
 
 TV_COLUMNS = [
     "name", "close", "change", "change_from_open",
@@ -222,7 +226,11 @@ def _row_to_quote(sym_field: str, d: list) -> dict | None:
     close = _num(_COL["close"])
     change = _num(_COL["change"])
     rvol = _num(_COL["relative_volume_10d_calc"])
-    if close is None or change is None or rvol is None:
+    # A pinned name only needs a live price to be usable — the curated model
+    # doesn't pre-score, so a missing rvol/change (common on thinly-traded new
+    # leveraged ETFs like SKHX) must not drop the name. Both are None-tolerant
+    # downstream (rvol/change default to 0.0; SMA-less trend falls to MIXED).
+    if close is None:
         return None
     earnings_raw = d[_COL["earnings_release_next_date"]]
     earnings_ts = int(earnings_raw) if isinstance(earnings_raw, (int, float)) else None
@@ -240,49 +248,16 @@ def _row_to_quote(sym_field: str, d: list) -> dict | None:
     }
 
 
-def tv_screen(sort_order: str) -> dict[str, dict]:
-    """One screen query (close>=5, mcap>=500M, NASDAQ/NYSE/AMEX). Fail-soft: {}."""
-    body = {
-        "columns": TV_COLUMNS,
-        "filter": [
-            {"left": "close", "operation": "greater", "right": 5},
-            {"left": "market_cap_basic", "operation": "greater", "right": 500_000_000},
-            {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]},
-        ],
-        "sort": {"sortBy": "relative_volume_10d_calc" if sort_order == "rvol"
-                  else "change", "sortOrder": "desc" if sort_order != "change_asc" else "asc"},
-        "range": [0, SCREEN_RANGE],
-        "markets": ["america"],
-    }
-    try:
-        raw = _post_json(TV_SCAN_URL, body)
-    except Exception as e:
-        log(f"WARN tv_screen({sort_order}) failed: {e}")
-        return {}
-    total = raw.get("totalCount")
-    rows = raw.get("data")
-    if not isinstance(rows, list):
-        return {}
-    out: dict[str, dict] = {}
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        q = _row_to_quote(item.get("s"), item.get("d"))
-        if q:
-            out[q["ticker"]] = q
-    out["__total__"] = total if isinstance(total, int) else len(out)
-    return out
-
-
 def _resolve_core_tv(missing: list[str]) -> dict[str, dict]:
-    """Self-healing exchange probe for core tickers the screens didn't cover.
+    """Self-healing exchange probe for pinned tickers.
 
-    Tries NASDAQ -> NYSE -> AMEX batch quote calls; a ticker only needs one
-    successful match. Fail-soft per exchange call.
+    Tries NASDAQ -> NYSE -> AMEX -> CBOE batch quote calls; a ticker only
+    needs one successful match. CBOE covers the memory/semi ETFs (DRAM, RAM,
+    SKHX) that list on Cboe BZX. Fail-soft per exchange call.
     """
     resolved: dict[str, dict] = {}
     remaining = list(missing)
-    for exch in ("NASDAQ", "NYSE", "AMEX"):
+    for exch in ("NASDAQ", "NYSE", "AMEX", "CBOE"):
         if not remaining:
             break
         tickers = [f"{exch}:{t}" for t in remaining]
@@ -308,47 +283,29 @@ def _resolve_core_tv(missing: list[str]) -> dict[str, dict]:
 
 
 def build_universe(dry_run: bool = False) -> tuple[dict[str, dict], int]:
-    """Union of TV screens + core list -> {ticker: quote}, screened count."""
-    screened_total = 0
-    quotes: dict[str, dict] = {}
+    """Resolve the fixed PINNED universe -> {ticker: quote}, watched count.
 
-    screen_specs = [("rvol", "desc"), ("change", "desc"), ("change", "asc")]
-    for field, order in screen_specs:
-        key = "rvol" if field == "rvol" else ("change_asc" if order == "asc" else "change")
-        res = tv_screen(key)
-        total = res.pop("__total__", 0)
-        screened_total = max(screened_total, total if isinstance(total, int) else 0)
-        for t, q in res.items():
-            quotes.setdefault(t, q)
-
-    missing_core = [t for t in CORE_LIST if t not in quotes]
-    if missing_core:
-        quotes.update(_resolve_core_tv(missing_core))
-
+    No market-wide screening: the universe is exactly the curated PINNED list
+    (watchlist + sector ETFs). Every name is resolved to a live TV quote via
+    the self-healing exchange probe. The second return value is the number of
+    names we set out to watch (len PINNED) — there is no "screened" market
+    count any more, so callers report it as the watched-list size.
+    """
+    names = list(PINNED)
     if dry_run:
-        # Keep it small & fast: watchlist + a handful of top-prescore names.
-        keep = set(WATCHLIST)
-        prescored = sorted(
-            (t for t in quotes if t not in keep),
-            key=lambda t: (quotes[t]["rvol"] or 0) * abs(quotes[t]["change_pct"] or 0),
-            reverse=True,
-        )
-        keep |= set(prescored[:8])
-        quotes = {t: q for t, q in quotes.items() if t in keep}
-
-    return quotes, screened_total
+        # Keep it small & fast: canonical picks + a couple sector ETFs.
+        names = ["MU", "CRWD", "COHR", "LLY", "V", "XOM", "SMH", "XLE", "XLK"]
+    quotes = _resolve_core_tv(names)
+    return quotes, len(names)
 
 
 def select_candidates(quotes: dict[str, dict]) -> list[str]:
-    """Pre-score = rvol*|change|; top MAX_CANDIDATES, always keep watchlist."""
-    scored = sorted(
-        quotes.keys(),
-        key=lambda t: (quotes[t]["rvol"] or 0) * abs(quotes[t]["change_pct"] or 0),
-        reverse=True,
-    )
-    top = scored[:MAX_CANDIDATES]
-    keep = list(dict.fromkeys(top + [t for t in WATCHLIST if t in quotes]))
-    return keep
+    """Every resolved pinned name is a candidate, in PINNED order.
+
+    The whole point of the curated universe is to show Zach's names, so there
+    is no pre-score cut — anything that resolved gets a CBOE chain pulled.
+    """
+    return [t for t in PINNED if t in quotes]
 
 
 # ── CBOE chain fetch + OCC parsing ──────────────────────────────────────────
@@ -656,7 +613,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
     log(f"cycle start {now_ct.strftime('%Y-%m-%d %H:%M CT')}")
 
     quotes, screened = build_universe(dry_run=dry_run)
-    log(f"screened={screened} universe={len(quotes)}")
+    log(f"watched={screened} resolved={len(quotes)}")
 
     candidates = select_candidates(quotes)
     log(f"candidates={len(candidates)}")
@@ -900,10 +857,10 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         "session_date": session_str,
         "market_state": market_state,
         "universe": {
-            "screened": screened,
-            "candidates": len(candidates),
-            "with_options": with_options,
-            "core_list": len(CORE_LIST),
+            "watched": screened,          # size of the curated pinned list
+            "candidates": len(candidates),  # of those, how many resolved a quote
+            "with_options": with_options,   # of those, how many had a usable chain
+            "pinned": len(PINNED),
         },
         "stats": {
             "bullish_flow": bullish_flow,
@@ -937,8 +894,8 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
 
 def _print_summary(data: dict) -> None:
     u = data["universe"]
-    print(f"\nscreened={u['screened']}  candidates={u['candidates']}  "
-          f"with_options={u['with_options']}  core_list={u['core_list']}")
+    print(f"\nwatched={u['watched']}  candidates={u['candidates']}  "
+          f"with_options={u['with_options']}  pinned={u['pinned']}")
     print(f"stats: {data['stats']}")
     print("\nTop 5 conviction:")
     for c in data["conviction"][:5]:

@@ -17,9 +17,11 @@ Open that link any time. It updates itself — there's nothing to install or run
 
 1. A scheduled job (a "GitHub Action") wakes up roughly every 7 minutes while
    the market is open.
-2. Each time it wakes up, it screens the whole market for active stocks, then
-   pulls free, 15-minute-delayed options data from CBOE and live stock prices
-   from TradingView.
+2. Each time it wakes up, it looks at a fixed, curated watch list — your
+   watchlist names plus the 11 sector-index ETFs (XLE, XLC, XLP, and the
+   rest) — and pulls free, 15-minute-delayed options data from CBOE and live
+   stock prices from TradingView for each one. It no longer screens the whole
+   market, so the boards only ever show names you chose to watch.
 3. It scores each stock onto two boards:
    - **Conviction** — short-term activity, expiring in the next 0–7 days.
    - **Swing** — longer-term activity, expiring anywhere from 2 weeks to 6 months out.

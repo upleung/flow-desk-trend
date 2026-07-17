@@ -14,10 +14,10 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "session_date": "2026-07-16",                  // trading date this data belongs to
   "market_state": "closed",                      // "open" | "premarket" | "afterhours" | "closed"
   "universe": {
-    "screened": 3442,      // stocks the TV screen matched
-    "candidates": 40,      // names we pulled CBOE chains for
-    "with_options": 38,    // of those, how many had a usable chain
-    "core_list": 60        // size of the static core list
+    "watched": 34,         // size of the curated pinned list (no market screen)
+    "candidates": 34,      // of those, how many resolved a live quote
+    "with_options": 31,    // of those, how many had a usable CBOE chain
+    "pinned": 34           // len(PINNED) — watchlist + sector ETFs
   },
   "stats": {                 // header tiles (computed across BOTH boards' members, deduped by ticker)
     "bullish_flow": 12,
