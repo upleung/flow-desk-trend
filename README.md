@@ -89,3 +89,6 @@ it ever stalls or you want to check on it:
 - **`data.json`** — the live snapshot the website reads. You won't see this
   file on the `main` branch — it only lives on the `data` branch, since it's
   regenerated constantly and doesn't need a history of its own on `main`.
+- **`history.json`** — the fetcher's day-over-day memory (per-name flow, open
+  interest, IV history — what powers persistence, OI-confirm and IV rank). Like
+  `data.json` it lives only on the `data` branch, not on `main`.

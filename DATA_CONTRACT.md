@@ -14,16 +14,16 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "session_date": "2026-07-16",                  // trading date this data belongs to
   "market_state": "closed",                      // "open" | "premarket" | "afterhours" | "closed"
   "universe": {
-    "watched": 34,         // size of the curated pinned list (no market screen)
-    "candidates": 34,      // of those, how many resolved a live quote
-    "with_options": 31,    // of those, how many had a usable CBOE chain
-    "pinned": 34           // len(PINNED) — watchlist + sector ETFs
+    "watched": 35,         // size of the curated pinned list (no market screen)
+    "candidates": 35,      // of those, how many resolved a live quote
+    "with_options": 35,    // of those, how many had a usable CBOE chain
+    "pinned": 35           // len(PINNED) — watchlist + sector ETFs
   },
   "stats": {                 // header tiles (computed across BOTH boards' members, deduped by ticker)
     "bullish_flow": 12,
     "bearish_flow": 9,
     "firing": 3,
-    "high_conviction": 14    // score >= 60
+    "high_conviction": 14    // conviction-board members with score >= 60 (swing-only tickers are not counted)
   },
   "conviction": [ <ConvictionCard>, ... ],   // 0-7 DTE board, sorted score desc
   "swing": [ <SwingCard>, ... ],              // 14d-6mo board, sorted score desc
@@ -35,6 +35,11 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   }
 }
 ```
+
+> **Note on `notes`:** the frontend does NOT render `notes.*` — it ships its
+> own tooltip copy (the `TIPS` object in `index.html`). The `notes` strings
+> here and the `TIPS` text describe the same methodology and must be kept in
+> sync whenever scoring or weights change.
 
 ### ConvictionCard
 ```json
@@ -88,8 +93,8 @@ string sentinel). All strings are already plain (frontend still escapes on rende
                                    // swing-bucket (14-183d) volume become held OI (+/-25% of
                                    // yesterday's side volume)? null if <2 days of side data or
                                    // yesterday's side volume < 500
-  "oi_confirm_frac": 0.41,         // (OI_today - OI_yest) / vol_yest on yesterday's direction side; null with oi_confirm
-  "oi_confirm_side": "CALL",       // which side was checked (yesterday's direction); null with oi_confirm
+  "oi_confirm_frac": 0.41,         // (OI_today - OI_yest) / vol_yest on yesterday's direction side; null when oi_confirm is null
+  "oi_confirm_side": "CALL",       // which side was checked (yesterday's direction); null when oi_confirm is null
   "trend": "UP",                   // "UP" | "DOWN" | "MIXED"  (spot vs SMA20/SMA50)
   "iv_rank": 63,                   // 0-100 percentile once >=20 sessions; else null
   "iv30": 0.98,                    // decimal; always present as fallback display

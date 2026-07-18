@@ -15,15 +15,18 @@ Self-contained, stdlib only. Two windows are exposed:
                             in that halo, so the publish loop uses this wider
                             window instead of the strict session.
 
-Usage (workflow step):
-    python3 market_guard.py >> $GITHUB_OUTPUT
+loop.py imports should_publish() directly; nothing writes to $GITHUB_OUTPUT
+anymore. workflow_dispatch runs do NOT bypass the guard — a forced single
+test cycle is requested via loop.py's FORCE_ONE_CYCLE/--force, which is the
+only bypass. (The self-redispatch chain re-fires the workflow AS
+workflow_dispatch, so a dispatch bypass here made every redispatched run
+immortal — it would chain 24/7 through nights and weekends.)
 
 Manual truth-table test:
     python3 market_guard.py --test
 """
 from __future__ import annotations
 
-import os
 import sys
 from datetime import date, datetime, timedelta
 
@@ -66,8 +69,6 @@ def in_extended_window(now: datetime) -> bool:
 
 def should_run(now: datetime | None = None) -> bool:
     """Return True if the strict session guard passes this cycle."""
-    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        return True
     if now is None:
         now = datetime.now(tz=TZ_CT)
     return _in_session(now)
@@ -76,11 +77,12 @@ def should_run(now: datetime | None = None) -> bool:
 def should_publish(now: datetime | None = None) -> bool:
     """Return True if loop.py's extended publish window passes this cycle.
 
-    This is the guard loop.py actually calls. workflow_dispatch always
-    passes (manual/smoke-test runs), matching should_run's convention.
+    This is the guard loop.py actually calls. NOTE: workflow_dispatch does
+    NOT bypass here. The self-redispatch chain re-fires the workflow as
+    workflow_dispatch, so a dispatch bypass made every redispatched run
+    immortal (chaining through nights/weekends). Forced single test cycles
+    bypass via loop.py's FORCE_ONE_CYCLE/--force instead — the only bypass.
     """
-    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        return True
     if now is None:
         now = datetime.now(tz=TZ_CT)
     return in_extended_window(now)

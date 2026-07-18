@@ -43,6 +43,17 @@ PIPELINE (letters match the build spec)
     pruned).
 
 ────────────────────────────────────────────────────────────────────────────
+FORCED OFF-HOURS CYCLES (added 2026-07-18)
+────────────────────────────────────────────────────────────────────────────
+When market_state == "closed" (weekend, or outside the 08:00-15:20 CT halo)
+the cycle STILL writes data.json so a forced test refreshes the live site,
+but it does NOT mutate history.json: no today_sessions row, no iv_history
+append, no first_board stamping, no save_history. This keeps forced off-hours
+tests from polluting the day-over-day memory. (A Saturday 2026-07-18 session
+row already exists on the data branch from a forced test taken before this
+guard — do NOT try to repair the data branch as part of this change.)
+
+────────────────────────────────────────────────────────────────────────────
 CONVICTION SCORE (0-100 int) — weights sum to 100
 ────────────────────────────────────────────────────────────────────────────
   RVOL              25 pts  min(rvol / 3.0, 1.0) * 25            (3x rvol caps)
@@ -738,6 +749,25 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
     session_date = now_ct.date()
     session_str = session_date.isoformat()
 
+    if now_ct.weekday() >= 5:
+        market_state = "closed"
+    else:
+        open_min = 8 * 60 + 30
+        close_min = 15 * 60
+        cur_min = now_ct.hour * 60 + now_ct.minute
+        pre_min = 8 * 60
+        post_min = 15 * 60 + 20
+        if open_min <= cur_min <= close_min:
+            market_state = "open"
+        elif pre_min <= cur_min < open_min:
+            market_state = "premarket"
+        elif close_min < cur_min <= post_min:
+            market_state = "afterhours"
+        else:
+            market_state = "closed"
+    # Forced off-hours cycles refresh data.json but must not touch history.
+    write_history = market_state != "closed"
+
     log(f"cycle start {now_ct.strftime('%Y-%m-%d %H:%M CT')}")
 
     quotes, screened = build_universe(dry_run=dry_run)
@@ -778,7 +808,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         new_prev_cycle["vols"][ticker] = analysis["contract_vols"]
 
         # iv30 history
-        if analysis["iv30"] is not None:
+        if write_history and analysis["iv30"] is not None:
             iv_history.setdefault(ticker, []).append(analysis["iv30"])
 
         # Today's session row (persisted regardless of board membership).
@@ -796,24 +826,25 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                 tilt_bull_day += prior_today["tilt_bull_prem"]
             if isinstance(prior_today.get("tilt_bear_prem"), (int, float)):
                 tilt_bear_day += prior_today["tilt_bear_prem"]
-        today_sessions[ticker] = {
-            "net_flow_0_7": net_flow,
-            "sum_oi_0_7": analysis["sum_oi_0_7_directional"],
-            "gross_prem_0_7": analysis["total_premium_0_7"],   # calls+puts prem (for flow_5d %)
-            "iv30": analysis["iv30"],
-            "direction": direction,
-            "tilt_bull_prem": tilt_bull_day,
-            "tilt_bear_prem": tilt_bear_day,
-            # swing-bucket per-side totals — tomorrow's OI-confirm inputs
-            "swing_vol_c": analysis["swing_calls_vol"],
-            "swing_vol_p": analysis["swing_puts_vol"],
-            "swing_oi_c": analysis["swing_calls_oi"],
-            "swing_oi_p": analysis["swing_puts_oi"],
-        }
-        if isinstance(prior_today, dict):
-            for k in ("first_board_conviction", "first_board_swing"):
-                if k in prior_today and prior_today[k]:
-                    today_sessions[ticker][k] = prior_today[k]
+        if write_history:
+            today_sessions[ticker] = {
+                "net_flow_0_7": net_flow,
+                "sum_oi_0_7": analysis["sum_oi_0_7_directional"],
+                "gross_prem_0_7": analysis["total_premium_0_7"],   # calls+puts prem (for flow_5d %)
+                "iv30": analysis["iv30"],
+                "direction": direction,
+                "tilt_bull_prem": tilt_bull_day,
+                "tilt_bear_prem": tilt_bear_day,
+                # swing-bucket per-side totals — tomorrow's OI-confirm inputs
+                "swing_vol_c": analysis["swing_calls_vol"],
+                "swing_vol_p": analysis["swing_puts_vol"],
+                "swing_oi_c": analysis["swing_calls_oi"],
+                "swing_oi_p": analysis["swing_puts_oi"],
+            }
+            if isinstance(prior_today, dict):
+                for k in ("first_board_conviction", "first_board_swing"):
+                    if k in prior_today and prior_today[k]:
+                        today_sessions[ticker][k] = prior_today[k]
 
         # tilt for display/scoring: bounded -1..+1, null until anything classifies
         tilt_prem_total = tilt_bull_day + tilt_bear_day
@@ -1006,16 +1037,24 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
 
     # ── alert memory: stamp first_board_* only for names that actually made
     # the capped board this cycle, and only once per ticker per day ────────
-    now_iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-    for board_cards, key in ((conviction_cards, "first_board_conviction"),
-                              (swing_cards, "first_board_swing")):
-        for c in board_cards:
-            ticker = c["ticker"]
-            row = today_sessions.setdefault(ticker, {})
-            if key not in row or not row[key]:
-                row[key] = {"time": now_iso, "spot": c["spot"]}
-            fb = row[key]
-            c["spot_at_alert"] = fb.get("spot") if isinstance(fb, dict) else None
+    if write_history:
+        now_iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for board_cards, key in ((conviction_cards, "first_board_conviction"),
+                                  (swing_cards, "first_board_swing")):
+            for c in board_cards:
+                ticker = c["ticker"]
+                row = today_sessions.setdefault(ticker, {})
+                if key not in row or not row[key]:
+                    row[key] = {"time": now_iso, "spot": c["spot"]}
+                fb = row[key]
+                c["spot_at_alert"] = fb.get("spot") if isinstance(fb, dict) else None
+    else:
+        # Closed-day cycle: no history mutation, but spot_at_alert must still
+        # be present on every card (DATA_CONTRACT field shape) — the frontend
+        # already treats a missing/null value as "new this cycle" (no gain chip).
+        for board_cards in (conviction_cards, swing_cards):
+            for c in board_cards:
+                c["spot_at_alert"] = None
 
     # ── stats tiles (union of both boards, deduped) ─────────────────────────
     by_ticker: dict[str, dict] = {}
@@ -1032,23 +1071,6 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
     firing_count = sum(1 for v in by_ticker.values() if v.get("firing"))
     high_conviction = sum(1 for v in by_ticker.values()
                           if v.get("score_conv") is not None and v["score_conv"] >= 60)
-
-    if now_ct.weekday() >= 5:
-        market_state = "closed"
-    else:
-        open_min = 8 * 60 + 30
-        close_min = 15 * 60
-        cur_min = now_ct.hour * 60 + now_ct.minute
-        pre_min = 8 * 60
-        post_min = 15 * 60 + 20
-        if open_min <= cur_min <= close_min:
-            market_state = "open"
-        elif pre_min <= cur_min < open_min:
-            market_state = "premarket"
-        elif close_min < cur_min <= post_min:
-            market_state = "afterhours"
-        else:
-            market_state = "closed"
 
     data = {
         "generated_at": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1092,7 +1114,8 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(data_path)
 
-    save_history(out_dir, history)
+    if write_history:
+        save_history(out_dir, history)
     save_prev_cycle(new_prev_cycle)
 
     log(f"wrote {data_path} ({data_path.stat().st_size} bytes)")
