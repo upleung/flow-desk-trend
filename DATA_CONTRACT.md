@@ -29,7 +29,9 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "swing": [ <SwingCard>, ... ],              // 14d-6mo board, sorted score desc
   "notes": {
     "flow_proxy": "Net flow = call premium traded minus put premium traded (volume x last x 100). Free data can't see buy/sell side — this is premium changing hands, not directional order flow.",
-    "delay": "Options data is 15-minute delayed (CBOE free feed). Stock prices update live every 30s (TradingView Cboe One)."
+    "delay": "Options data is 15-minute delayed (CBOE free feed). Stock prices update live every 30s (TradingView Cboe One).",
+    "tilt": "…methodology one-liner for the aggressor tilt (see build_snapshot.py header)…",
+    "oi_confirm": "…methodology one-liner for OI-confirm…"
   }
 }
 ```
@@ -48,6 +50,11 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "cp_ratio": 2.35,                // call vol / put vol, 0-7 DTE; null if no put vol
   "rvol": 1.04,                    // relative_volume_10d_calc from TV
   "change_pct": -0.66,             // TV change (day % )
+  "tilt": 0.64,                    // aggressor tilt, -1..+1: day-accumulated sampled buy/sell
+                                   // classification of traded contracts vs their bid/ask
+                                   // (+1 = all classified premium leaned bullish); null until
+                                   // anything classifies ("sampling"). Both DTE buckets.
+  "tilt_prem": 1250000.0,          // $ premium classified into the tilt today (both sides summed)
   "popular_contract": {            // max-premium contract within +/-20% moneyness, 0-7 DTE; null if none
     "side": "CALL",                // "CALL" | "PUT"
     "strike": 860.0,
@@ -77,6 +84,12 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "flow_5d": 18500000.0,           // signed $, sum of last up-to-5 sessions' net flow
   "flow_5d_pct": 62.0,             // flow_5d as % of gross premium (calls+puts) over the same sessions; signed, -100..+100; null if no gross history
   "oi_build": 12000,               // day-over-day sum-OI delta in the flow direction (contracts); null if <2 days history
+  "oi_confirm": "OPENING",         // "OPENING" | "CLOSING" | "CHURN" | null — did yesterday's
+                                   // swing-bucket (14-183d) volume become held OI (+/-25% of
+                                   // yesterday's side volume)? null if <2 days of side data or
+                                   // yesterday's side volume < 500
+  "oi_confirm_frac": 0.41,         // (OI_today - OI_yest) / vol_yest on yesterday's direction side; null with oi_confirm
+  "oi_confirm_side": "CALL",       // which side was checked (yesterday's direction); null with oi_confirm
   "trend": "UP",                   // "UP" | "DOWN" | "MIXED"  (spot vs SMA20/SMA50)
   "iv_rank": 63,                   // 0-100 percentile once >=20 sessions; else null
   "iv30": 0.98,                    // decimal; always present as fallback display
@@ -113,6 +126,12 @@ string sentinel). All strings are already plain (frontend still escapes on rende
         "gross_prem_0_7": 10600000.0, // calls+puts premium, 0-7 DTE (denominator for flow_5d_pct)
         "iv30": 0.98,
         "direction": "BULL",
+        "tilt_bull_prem": 2100000.0, // day-accumulated classified bullish premium (calls bought + puts sold)
+        "tilt_bear_prem": 850000.0,  // day-accumulated classified bearish premium (calls sold + puts bought)
+        "swing_vol_c": 41000,        // swing-bucket (14-183d) call volume   — OI-confirm inputs
+        "swing_vol_p": 28000,        // swing-bucket put volume
+        "swing_oi_c": 910000,        // swing-bucket call OI
+        "swing_oi_p": 640000,        // swing-bucket put OI
         "first_board_conviction": {"time": "2026-07-16T14:32:00Z", "spot": 851.10},
         "first_board_swing": {"time": "2026-07-16T14:32:00Z", "spot": 851.10}
       }
@@ -122,8 +141,17 @@ string sentinel). All strings are already plain (frontend still escapes on rende
 }
 ```
 Keep max 60 sessions; prune older. `iv_history` keeps max 60 values/name.
-On each cycle: reload history, update today's row (net_flow, sum_oi, iv30, direction),
-set first_board_* only if not already set today, recompute persist/flow_5d/flow_5d_pct/oi_build/iv_rank.
+On each cycle: reload history, update today's row (net_flow, sum_oi, iv30, direction,
+swing side vol/OI; tilt_*_prem ACCUMULATE across the day's cycles rather than being
+overwritten), set first_board_* only if not already set today, recompute
+persist/flow_5d/flow_5d_pct/oi_build/oi_confirm/iv_rank.
+
+`fetcher/.prev_cycle.json` (job-local, gitignored, NOT part of the data branch):
+`{"session": "2026-07-18", "flows": {ticker: net_flow}, "vols": {ticker: {occ: cum_volume}}}`.
+flows drives the firing accel check; vols is the per-contract baseline for the
+aggressor-tilt volume deltas (same session only — after a workflow restart the
+first cycle contributes no tilt, by design). Legacy flat {ticker: net_flow}
+files are still readable.
 
 ## Symbol hygiene (fetcher)
 Skip TV tickers containing `/`, `.`, `-` (preferred shares, warrants, units).

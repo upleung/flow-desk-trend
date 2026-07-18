@@ -31,13 +31,36 @@ Open that link any time. It updates itself — there's nothing to install or run
    TradingView every 30 seconds so the prices on screen stay live even
    between refreshes.
 
+## The two direction estimators (added 2026-07-18)
+
+Free data can't directly see whether a trade was a buy or a sell, but two
+things get squeezed out of the same free feed to get closer:
+
+- **AGGR TILT (conviction board)** — every refresh, each contract that traded
+  is checked against its bid/ask spread: a trade printed near the ask counts
+  as *bought*, near the bid as *sold*. Calls bought + puts sold = bullish
+  premium; calls sold + puts bought = bearish. The tilt is the day's running
+  balance, −100% to +100%. It only samples one trade per contract per refresh
+  (~7 min), so it's a rough proxy — the card shows how many dollars it's
+  based on, and shows "sampling" until enough trades classify.
+- **OI-confirm (swing board, under OI BUILD)** — the next morning, yesterday's
+  longer-dated volume is checked against today's open interest. If open
+  interest grew by at least 25% of that volume, yesterday's flow became held
+  positions (**OPENING ✓** — conviction). If it shrank that much, positions
+  were being unwound (**CLOSING ✗**). Anything between is **CHURN** —
+  day-traded or rolled, not held.
+
+Both nudge the 0–100 scores a little (tilt: ±5 on conviction; OI-confirm: +5
+or −10 on swing) but never dominate them.
+
 ## Its limits
 
 - **Options data is 15 minutes delayed.** It's free CBOE data, not a live feed.
 - **"Net flow" is a proxy, not real order flow.** Free data can't tell you
   whether a trade was a buyer or a seller — it only shows how much option
   premium changed hands and in which direction the volume leaned. Treat it as
-  a clue, not a fact.
+  a clue, not a fact. The AGGR TILT estimator above narrows this gap but is
+  itself a sampled approximation, not the real tape.
 - **This is not financial advice.** It's a personal research tool. Nothing on
   the boards is a recommendation to buy or sell anything.
 

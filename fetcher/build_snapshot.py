@@ -64,6 +64,49 @@ absent on first run); acceleration = same-sign net_flow with
 |net_flow| >= |prev| * ACCEL_MULT (1.5x).
 
 ────────────────────────────────────────────────────────────────────────────
+AGGRESSOR TILT (added 2026-07-18, Zach-approved; see vault
+market-data/flow-desk/DIRECTIONAL_FLOW_DECISION.md)
+────────────────────────────────────────────────────────────────────────────
+Free chains can't see buy vs sell side, but each snapshot carries bid/ask/last
+per contract. Between cycles we take each contract's VOLUME DELTA (cumulative
+volume now minus previous cycle, same session only — volume resets overnight,
+a negative delta means new session and is skipped) and classify the contract's
+last trade against the current quote:
+  pos = (last - bid) / (ask - bid), requiring ask > bid >= 0 and last > 0
+  pos >= 0.60 -> traded at/near ask  (aggressive BUY)
+  pos <= 0.40 -> traded at/near bid  (aggressive SELL)
+  else        -> mid/unclassifiable  (excluded)
+Premium of the delta (dv * last * 100) is bucketed:
+  bullish = calls bought + puts sold;  bearish = calls sold + puts bought
+and ACCUMULATED PER NAME PER DAY in history.json (tilt_bull_prem /
+tilt_bear_prem on today's row — survives workflow re-dispatch). Per-contract
+volume baselines live in .prev_cycle.json (job-local; after a restart the
+first cycle just contributes nothing — fail-soft undercount, never a wrong
+count). tilt = (bull - bear) / (bull + bear), -1..+1, null until anything
+classifies. HONEST LIMIT (tooltipped in the UI): this samples only each
+contract's LAST trade once per ~7-min cycle — a sampled proxy of aggressor
+direction, not the full tape.
+Scoring: conviction score gets a bounded post-adjustment, +5 if the tilt
+agrees with the card's direction (|tilt| >= 0.30 and classified premium >=
+$100k), -5 if it opposes at the same thresholds; clamped 0-100.
+
+────────────────────────────────────────────────────────────────────────────
+OI-CONFIRM (added 2026-07-18, same approval)
+────────────────────────────────────────────────────────────────────────────
+Did yesterday's flow OPEN new positions or just churn/close? Compare today's
+open interest against yesterday's, normalized by yesterday's volume, on the
+SWING bucket (14-183d — the 0-7DTE bucket is polluted by weekly expirations),
+on the side (calls/puts) of YESTERDAY'S direction:
+  frac = (oi_today_side - oi_yesterday_side) / yesterday_vol_side
+  frac >= +0.25 -> "OPENING"   (yesterday's volume became held positions)
+  frac <= -0.25 -> "CLOSING"   (positions unwound into the flow)
+  else          -> "CHURN"     (day-traded / rolled)
+  null when <2 sessions of side data or yesterday's side volume < 500
+Scoring: swing score post-adjustment +5 OPENING / -10 CLOSING, applied ONLY
+when yesterday's direction matches today's (a confirm of the opposite side
+says nothing about today's thesis); clamped 0-100.
+
+────────────────────────────────────────────────────────────────────────────
 SWING SCORE (0-100 int) — weights sum to 100, persist dominates
 ────────────────────────────────────────────────────────────────────────────
   Persist           35 pts  persist / persist_max * 35   (heaviest — a flow
@@ -128,6 +171,19 @@ DTE_SWING_LO, DTE_SWING_HI = 14, 183
 STOP_MULT = 0.70
 TARGET_MULT = 2.05
 FIXED_RR = 3.5
+
+# Aggressor tilt (see header): classification band + score-adjust thresholds.
+TILT_BUY_POS = 0.60          # (last-bid)/(ask-bid) >= this -> aggressive buy
+TILT_SELL_POS = 0.40         # <= this -> aggressive sell
+TILT_MIN_ABS = 0.30          # |tilt| needed before it can move the score
+TILT_MIN_PREM = 100_000.0    # classified $ premium needed before it can move the score
+TILT_SCORE_ADJ = 5           # +/- points on the conviction score
+
+# OI-confirm (see header): swing-bucket open-vs-close thresholds.
+OI_CONFIRM_FRAC = 0.25       # |OI delta| / yesterday volume beyond this = OPENING/CLOSING
+OI_CONFIRM_MIN_VOL = 500     # yesterday side volume below this -> null (can't judge)
+OI_CONFIRM_OPEN_ADJ = 5      # swing score bonus on OPENING (directions matching)
+OI_CONFIRM_CLOSE_ADJ = -10   # swing score penalty on CLOSING (directions matching)
 
 
 # ── Curated universe (Zach's ruling 2026-07-17) ────────────────────────────
@@ -371,8 +427,15 @@ def _num(v) -> float | None:
     return float(v) if isinstance(v, (int, float)) else None
 
 
-def analyze_ticker(ticker: str, chain: dict, session_date: date) -> dict:
-    """Bucket a chain's contracts into 0-7DTE and 14-183d groups + metrics."""
+def analyze_ticker(ticker: str, chain: dict, session_date: date,
+                   prev_vols: dict | None = None) -> dict:
+    """Bucket a chain's contracts into 0-7DTE and 14-183d groups + metrics.
+
+    prev_vols: {occ: cumulative volume at the previous cycle}, SAME session
+    only (caller enforces) — enables the aggressor-tilt classification of
+    each contract's volume delta. None -> no baseline, tilt contributes 0
+    this cycle (fail-soft undercount).
+    """
     spot = chain["spot"]
     short_calls_vol = short_puts_vol = 0.0
     short_calls_prem = short_puts_prem = 0.0
@@ -380,6 +443,10 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date) -> dict:
     popular = None       # (premium, contract_dict)
     swing_candidates: list[tuple[float, dict]] = []  # (premium, contract) 0.30<=|delta|<=0.60
     swing_call_prem = swing_put_prem = 0.0
+    swing_calls_vol = swing_puts_vol = 0.0
+    swing_calls_oi = swing_puts_oi = 0.0
+    tilt_bull = tilt_bear = 0.0          # this cycle's classified premium
+    contract_vols: dict[str, float] = {}  # occ -> cumulative vol (next cycle's baseline)
 
     for opt in chain["options"]:
         if not isinstance(opt, dict):
@@ -403,7 +470,37 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date) -> dict:
         iv = _num(opt.get("iv"))
         premium = vol * last * 100.0
 
-        if DTE_SHORT_LO <= dte <= DTE_SHORT_HI:
+        in_short = DTE_SHORT_LO <= dte <= DTE_SHORT_HI
+        in_swing = DTE_SWING_LO <= dte <= DTE_SWING_HI
+
+        # ── aggressor tilt (both DTE buckets) ──────────────────────────
+        # Cumulative volumes feed the next cycle's baseline; with a same-
+        # session baseline, classify this cycle's volume delta against the
+        # current quote. A contract absent from the baseline simply traded
+        # its first volume this cycle (delta = full volume).
+        if (in_short or in_swing) and vol > 0:
+            contract_vols[occ] = vol
+            if prev_vols is not None and last > 0:
+                prev_v = prev_vols.get(occ, 0.0)
+                dv = vol - (prev_v if isinstance(prev_v, (int, float)) else 0.0)
+                bid = _num(opt.get("bid"))
+                ask = _num(opt.get("ask"))
+                if dv > 0 and bid is not None and ask is not None and ask > bid >= 0:
+                    pos = (last - bid) / (ask - bid)
+                    prem_d = dv * last * 100.0
+                    if pos >= TILT_BUY_POS:       # bought at/near the ask
+                        if cp == "C":
+                            tilt_bull += prem_d
+                        else:
+                            tilt_bear += prem_d
+                    elif pos <= TILT_SELL_POS:    # sold at/near the bid
+                        if cp == "C":
+                            tilt_bear += prem_d
+                        else:
+                            tilt_bull += prem_d
+                    # mid-band trades stay unclassified (excluded)
+
+        if in_short:
             if cp == "C":
                 short_calls_vol += vol
                 short_calls_prem += premium
@@ -428,11 +525,15 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date) -> dict:
                         "occ": occ,
                     })
 
-        if DTE_SWING_LO <= dte <= DTE_SWING_HI:
+        if in_swing:
             if cp == "C":
                 swing_call_prem += premium
+                swing_calls_vol += vol
+                swing_calls_oi += oi
             else:
                 swing_put_prem += premium
+                swing_puts_vol += vol
+                swing_puts_oi += oi
             if delta is not None and SWING_DELTA_LO <= abs(delta) <= SWING_DELTA_HI:
                 swing_candidates.append((premium, {
                     "side": "CALL" if cp == "C" else "PUT",
@@ -488,6 +589,15 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date) -> dict:
         "has_short_bucket": sum_vol_0_7 > 0,
         "cp_skew": cp_skew,
         "suggested_contract": suggested,
+        # swing-bucket per-side totals (OI-confirm inputs, stored in history)
+        "swing_calls_vol": swing_calls_vol,
+        "swing_puts_vol": swing_puts_vol,
+        "swing_calls_oi": swing_calls_oi,
+        "swing_puts_oi": swing_puts_oi,
+        # this cycle's classified aggressor premium + next cycle's baseline
+        "tilt_bull_cycle": tilt_bull,
+        "tilt_bear_cycle": tilt_bear,
+        "contract_vols": contract_vols,
     }
 
 
@@ -522,11 +632,27 @@ def save_history(out_dir: Path, history: dict) -> None:
 
 
 def load_prev_cycle() -> dict:
+    """Load the prior cycle's cache: {"session", "flows", "vols"}.
+
+    Legacy shape (flat {ticker: net_flow}) is accepted as flows-only with an
+    unknown session — accel still works, tilt just has no baseline yet.
+    """
+    empty = {"session": None, "flows": {}, "vols": {}}
     try:
         raw = json.loads(PREV_CYCLE_FILE.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
+        if not isinstance(raw, dict):
+            return empty
+        if "flows" in raw:
+            return {
+                "session": raw.get("session") if isinstance(raw.get("session"), str) else None,
+                "flows": raw.get("flows") if isinstance(raw.get("flows"), dict) else {},
+                "vols": raw.get("vols") if isinstance(raw.get("vols"), dict) else {},
+            }
+        # legacy flat shape
+        flows = {k: v for k, v in raw.items() if isinstance(v, (int, float))}
+        return {"session": None, "flows": flows, "vols": {}}
     except Exception:
-        return {}
+        return empty
 
 
 def save_prev_cycle(data: dict) -> None:
@@ -624,7 +750,8 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
     today_sessions = history["sessions"].setdefault(session_str, {})
     iv_history = history["iv_history"]
     prev_cycle = load_prev_cycle()
-    new_prev_cycle: dict[str, float] = {}
+    same_session = prev_cycle["session"] == session_str
+    new_prev_cycle: dict = {"session": session_str, "flows": {}, "vols": {}}
 
     conviction_cards = []
     swing_cards = []
@@ -641,10 +768,14 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         if quote is None:
             continue
 
-        analysis = analyze_ticker(ticker, chain, session_date)
+        prev_vols = prev_cycle["vols"].get(ticker) if same_session else None
+        if not isinstance(prev_vols, dict):
+            prev_vols = None
+        analysis = analyze_ticker(ticker, chain, session_date, prev_vols=prev_vols)
         direction = analysis["direction"]
         net_flow = analysis["net_flow"]
-        new_prev_cycle[ticker] = net_flow
+        new_prev_cycle["flows"][ticker] = net_flow
+        new_prev_cycle["vols"][ticker] = analysis["contract_vols"]
 
         # iv30 history
         if analysis["iv30"] is not None:
@@ -655,17 +786,38 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         # prior cycle), must survive this reassignment — carried forward
         # explicitly since first_board_* is stamped in a later pass below.
         prior_today = today_sessions.get(ticker)
+        # Aggressor tilt accumulates ACROSS cycles within the day: prior
+        # cycles' classified premium (persisted in history.json, so it
+        # survives a workflow re-dispatch) plus this cycle's increment.
+        tilt_bull_day = analysis["tilt_bull_cycle"]
+        tilt_bear_day = analysis["tilt_bear_cycle"]
+        if isinstance(prior_today, dict):
+            if isinstance(prior_today.get("tilt_bull_prem"), (int, float)):
+                tilt_bull_day += prior_today["tilt_bull_prem"]
+            if isinstance(prior_today.get("tilt_bear_prem"), (int, float)):
+                tilt_bear_day += prior_today["tilt_bear_prem"]
         today_sessions[ticker] = {
             "net_flow_0_7": net_flow,
             "sum_oi_0_7": analysis["sum_oi_0_7_directional"],
             "gross_prem_0_7": analysis["total_premium_0_7"],   # calls+puts prem (for flow_5d %)
             "iv30": analysis["iv30"],
             "direction": direction,
+            "tilt_bull_prem": tilt_bull_day,
+            "tilt_bear_prem": tilt_bear_day,
+            # swing-bucket per-side totals — tomorrow's OI-confirm inputs
+            "swing_vol_c": analysis["swing_calls_vol"],
+            "swing_vol_p": analysis["swing_puts_vol"],
+            "swing_oi_c": analysis["swing_calls_oi"],
+            "swing_oi_p": analysis["swing_puts_oi"],
         }
         if isinstance(prior_today, dict):
             for k in ("first_board_conviction", "first_board_swing"):
                 if k in prior_today and prior_today[k]:
                     today_sessions[ticker][k] = prior_today[k]
+
+        # tilt for display/scoring: bounded -1..+1, null until anything classifies
+        tilt_prem_total = tilt_bull_day + tilt_bear_day
+        tilt = ((tilt_bull_day - tilt_bear_day) / tilt_prem_total) if tilt_prem_total > 0 else None
 
         # ── swing metrics from history ──────────────────────────────────
         # persist: n/5 -- fixed 5-session denominator (contract's PERSIST_MAX);
@@ -707,6 +859,33 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
             y_row = history["sessions"][prior_dates[-1]].get(ticker)
             if isinstance(y_row, dict) and isinstance(y_row.get("sum_oi_0_7"), (int, float)):
                 oi_build = analysis["sum_oi_0_7_directional"] - y_row["sum_oi_0_7"]
+
+        # OI-confirm: did yesterday's swing-bucket volume OPEN new positions
+        # (OI grew by a meaningful fraction of it), CLOSE positions, or churn?
+        # Computed on the side of YESTERDAY'S direction; see module header.
+        oi_confirm = None
+        oi_confirm_frac = None
+        oi_confirm_side = None
+        oi_confirm_dir_match = False
+        if prior_dates:
+            y_row = history["sessions"][prior_dates[-1]].get(ticker)
+            if isinstance(y_row, dict) and isinstance(y_row.get("direction"), str):
+                y_side = "c" if y_row["direction"] == "BULL" else "p"
+                y_vol = y_row.get(f"swing_vol_{y_side}")
+                y_oi = y_row.get(f"swing_oi_{y_side}")
+                t_oi = analysis["swing_calls_oi"] if y_side == "c" else analysis["swing_puts_oi"]
+                if (isinstance(y_vol, (int, float)) and isinstance(y_oi, (int, float))
+                        and y_vol >= OI_CONFIRM_MIN_VOL):
+                    frac = (t_oi - y_oi) / y_vol
+                    oi_confirm_frac = round(frac, 3)
+                    oi_confirm_side = "CALL" if y_side == "c" else "PUT"
+                    oi_confirm_dir_match = (y_row["direction"] == direction)
+                    if frac >= OI_CONFIRM_FRAC:
+                        oi_confirm = "OPENING"
+                    elif frac <= -OI_CONFIRM_FRAC:
+                        oi_confirm = "CLOSING"
+                    else:
+                        oi_confirm = "CHURN"
 
         # trend: spot vs SMA20/SMA50
         spot = analysis["spot"]
@@ -755,8 +934,14 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         # candidate's score is known and the list is sorted+capped below, so
         # stamping happens in a second pass over the surviving cards.
         conv_score = conviction_score(analysis, quote)
+        # Aggressor-tilt post-adjustment (bounded, see module header): the
+        # sampled buy/sell tilt confirming or contradicting the premium-proxy
+        # direction moves the score +/-5 once enough premium has classified.
+        if tilt is not None and tilt_prem_total >= TILT_MIN_PREM and abs(tilt) >= TILT_MIN_ABS:
+            agrees = (tilt > 0) == (direction == "BULL")
+            conv_score = max(0, min(100, conv_score + (TILT_SCORE_ADJ if agrees else -TILT_SCORE_ADJ)))
         accel = False
-        prev_flow = prev_cycle.get(ticker)
+        prev_flow = prev_cycle["flows"].get(ticker)
         if isinstance(prev_flow, (int, float)) and prev_flow != 0 and net_flow != 0:
             if (net_flow > 0) == (prev_flow > 0) and abs(net_flow) >= abs(prev_flow) * ACCEL_MULT:
                 accel = True
@@ -775,12 +960,21 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                 "cp_ratio": analysis["cp_ratio"],
                 "rvol": quote["rvol"],
                 "change_pct": quote["change_pct"],
+                "tilt": round(tilt, 3) if tilt is not None else None,
+                "tilt_prem": tilt_prem_total,
                 "popular_contract": analysis["popular_contract"],
             })
 
         if suggested is not None:
             sw_score = swing_score(persist, persist_max, flow_5d, oi_build,
                                     trend, direction, iv_rank, analysis["cp_skew"])
+            # OI-confirm post-adjustment (bounded, see module header) — only
+            # when yesterday's direction matches today's card.
+            if oi_confirm_dir_match:
+                if oi_confirm == "OPENING":
+                    sw_score = max(0, min(100, sw_score + OI_CONFIRM_OPEN_ADJ))
+                elif oi_confirm == "CLOSING":
+                    sw_score = max(0, min(100, sw_score + OI_CONFIRM_CLOSE_ADJ))
             swing_cards.append({
                 "ticker": ticker,
                 "tv_symbol": quote["tv_symbol"],
@@ -792,6 +986,9 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                 "flow_5d": flow_5d,
                 "flow_5d_pct": flow_5d_pct,
                 "oi_build": oi_build,
+                "oi_confirm": oi_confirm,
+                "oi_confirm_frac": oi_confirm_frac,
+                "oi_confirm_side": oi_confirm_side,
                 "trend": trend,
                 "iv_rank": iv_rank,
                 "iv30": analysis["iv30"],
@@ -878,6 +1075,14 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                            "— this is premium changing hands, not directional order flow."),
             "delay": ("Options data is 15-minute delayed (CBOE free feed). Stock prices "
                       "update live every 30s (TradingView Cboe One)."),
+            "tilt": ("Aggressor tilt classifies each contract's last trade against its "
+                     "bid/ask each refresh (near ask = bought, near bid = sold) and "
+                     "accumulates the day's classified premium: calls bought + puts sold "
+                     "= bullish, calls sold + puts bought = bearish. It samples one trade "
+                     "per contract per ~7-min cycle — a sampled proxy, not the full tape."),
+            "oi_confirm": ("OI-confirm checks whether yesterday's 2wk-6mo flow became "
+                           "held positions: open interest up >=25% of yesterday's volume "
+                           "= OPENING, down >=25% = CLOSING, else CHURN."),
         },
     }
 
