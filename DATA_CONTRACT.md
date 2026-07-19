@@ -25,16 +25,42 @@ string sentinel). All strings are already plain (frontend still escapes on rende
     "firing": 3,
     "high_conviction": 14    // conviction-board members with score >= 60 (swing-only tickers are not counted)
   },
+  "etf_flows": {             // semi ETF share-flow context card (added 2026-07-19); null if the fetch failed and no history exists
+    "as_of_session": "2026-07-18",   // session the shares-outstanding snapshot belongs to
+    "funds": [                        // fixed order: SMH, SOXX, SOXL, SOXS, DRAM; a fund with no data this cycle is omitted
+      {
+        "ticker": "SMH",
+        "flow_1d": -123456789.0,      // (shares outstanding this session - previous session) x NAV, signed $;
+                                      // null until 2 sessions of SO history exist ("collecting")
+        "baseline_session": "2026-07-17",  // session the SO baseline came from; null when flow_1d is null
+        "streak": 3,                  // consecutive sessions (incl. latest) of same-sign daily flow; null when flow_1d is null
+        "flow_1m": -4800472730.0,     // trailing 1-month net flow $, straight from TV fund_flows.1M; null if TV omits it
+        "aum": 71093689042.6,         // fund AUM $ (TV); null if TV omits it
+        "so": 120391874,              // shares outstanding this session
+        "nav": 568.67                 // NAV per share (TV); the $ multiplier for flow_1d
+      }
+    ]
+  },
   "conviction": [ <ConvictionCard>, ... ],   // 0-7 DTE board, sorted score desc
   "swing": [ <SwingCard>, ... ],              // 14d-6mo board, sorted score desc
   "notes": {
     "flow_proxy": "Net flow = call premium traded minus put premium traded (volume x last x 100). Free data can't see buy/sell side — this is premium changing hands, not directional order flow.",
     "delay": "Options data is 15-minute delayed (CBOE free feed). Stock prices update live every 30s (TradingView Cboe One).",
     "tilt": "…methodology one-liner for the aggressor tilt (see build_snapshot.py header)…",
-    "oi_confirm": "…methodology one-liner for OI-confirm…"
+    "oi_confirm": "…methodology one-liner for OI-confirm…",
+    "etf_flows": "…methodology one-liner for the semi ETF flows card…"
   }
 }
 ```
+
+> **Note on `etf_flows`:** this is a once-per-session CONTEXT signal, not a
+> scoring input — it never touches the conviction/swing scores. Daily flow is
+> estimated from the day-over-day change in the fund's shares outstanding
+> (ETFs create/destroy shares as money enters/leaves), so it reads "previous
+> session's money movement," unlike the 7-minute options boards. SOXX is
+> fetched for this card only — it is NOT part of the PINNED options universe.
+> The frontend must render nothing (no card) when `etf_flows` is null/absent
+> or `funds` is empty, so old snapshots keep working.
 
 > **Note on `notes`:** the frontend does NOT render `notes.*` — it ships its
 > own tooltip copy (the `TIPS` object in `index.html`). The `notes` strings
@@ -142,10 +168,16 @@ string sentinel). All strings are already plain (frontend still escapes on rende
       }
     }
   },
-  "iv_history": { "MU": [0.91, 0.88, 0.98, ...] }   // per-name daily iv30, most-recent last, for IV rank
+  "iv_history": { "MU": [0.91, 0.88, 0.98, ...] },  // per-name daily iv30, most-recent last, for IV rank
+  "etf_so": {                                        // semi ETF shares-outstanding snapshots (etf_flows inputs)
+    "SMH": { "2026-07-17": {"so": 120391874, "nav": 568.67}, ... }
+  }
 }
 ```
 Keep max 60 sessions; prune older. `iv_history` keeps max 60 values/name.
+`etf_so` keeps max 60 sessions/fund; like the rest of history it is only
+written when the market is not closed (forced weekend runs must not create
+phantom flow sessions).
 On each cycle: reload history, update today's row (net_flow, sum_oi, iv30, direction,
 swing side vol/OI; tilt_*_prem ACCUMULATE across the day's cycles rather than being
 overwritten), set first_board_* only if not already set today, recompute

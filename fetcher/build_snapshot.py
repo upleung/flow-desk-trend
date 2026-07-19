@@ -118,6 +118,19 @@ when yesterday's direction matches today's (a confirm of the opposite side
 says nothing about today's thesis); clamped 0-100.
 
 ────────────────────────────────────────────────────────────────────────────
+SEMI ETF FLOWS CONTEXT CARD (added 2026-07-19)
+────────────────────────────────────────────────────────────────────────────
+Who's moving actual fund money in semis — the closest free proxy to
+household/mutual-fund positioning. One TV batch scan per cycle pulls
+shares_outstanding / nav / aum / fund_flows.1M for ETF_FLOW_FUNDS
+(SMH, SOXX, SOXL, SOXS, DRAM). Daily flow = ΔSO between sessions x NAV
+(ETFs create/destroy shares as money enters/leaves the wrapper). SO
+snapshots live in history.json under "etf_so" (60 sessions kept, never
+written on closed days — same phantom-weekend rule as the rest of history).
+CONTEXT ONLY: rendered as a header card, never touches any score. SOXX is
+fetched for this card alone and stays out of the PINNED options universe.
+
+────────────────────────────────────────────────────────────────────────────
 SWING SCORE (0-100 int) — weights sum to 100, persist dominates
 ────────────────────────────────────────────────────────────────────────────
   Persist           35 pts  persist / persist_max * 35   (heaviest — a flow
@@ -195,6 +208,20 @@ OI_CONFIRM_FRAC = 0.25       # |OI delta| / yesterday volume beyond this = OPENI
 OI_CONFIRM_MIN_VOL = 500     # yesterday side volume below this -> null (can't judge)
 OI_CONFIRM_OPEN_ADJ = 5      # swing score bonus on OPENING (directions matching)
 OI_CONFIRM_CLOSE_ADJ = -10   # swing score penalty on CLOSING (directions matching)
+
+# ── Semi ETF share-flow context card (added 2026-07-19) ─────────────────────
+# Daily fund flows estimated from day-over-day shares-outstanding deltas:
+# ETFs create/destroy shares as money enters/leaves, so ΔSO x NAV ≈ net $
+# flow into the fund wrapper. TV's scanner exposes shares_outstanding, nav,
+# aum and a ready-made trailing fund_flows.1M for ETFs, all key-free
+# (verified live 2026-07-19 for all five funds below). This is a CONTEXT
+# signal only — it never touches the conviction/swing scores.
+# SOXX is fetched for this card only; it is NOT part of the PINNED options
+# universe (the card tracks the biggest semi ETF even though Zach's options
+# watchlist uses SMH/SOXL/SOXS).
+ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM"]
+ETF_FLOW_COLUMNS = ["name", "shares_outstanding", "nav", "aum", "fund_flows.1M"]
+MAX_ETF_SO_SESSIONS = 60     # history cap, same horizon as sessions/iv_history
 
 
 # ── Curated universe (Zach's ruling 2026-07-17) ────────────────────────────
@@ -612,6 +639,125 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
     }
 
 
+# ── Semi ETF share flows (context card) ──────────────────────────────────────
+
+def fetch_etf_fund_rows() -> dict[str, dict]:
+    """Batch TV scan for the semi-ETF flow funds -> {ticker: fund row}.
+
+    Same self-healing exchange probe as _resolve_core_tv (SMH/SOXX list on
+    NASDAQ, SOXL/SOXS on AMEX, DRAM on Cboe BZX — but don't trust a static
+    map). Fail-soft per exchange call; a fund with no row anywhere is simply
+    absent from the result.
+    """
+    resolved: dict[str, dict] = {}
+    remaining = list(ETF_FLOW_FUNDS)
+    for exch in ("NASDAQ", "NYSE", "AMEX", "CBOE"):
+        if not remaining:
+            break
+        body = {"symbols": {"tickers": [f"{exch}:{t}" for t in remaining]},
+                "columns": ETF_FLOW_COLUMNS}
+        try:
+            raw = _post_json(TV_SCAN_URL, body)
+        except Exception as e:
+            log(f"WARN etf-flows resolve on {exch} failed: {e}")
+            continue
+        rows = raw.get("data") if isinstance(raw, dict) else None
+        if not isinstance(rows, list):
+            continue
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            d = item.get("d")
+            if not isinstance(d, list) or len(d) < len(ETF_FLOW_COLUMNS):
+                continue
+            name = d[0]
+            if not isinstance(name, str) or name in resolved:
+                continue
+            resolved[name] = {
+                "so": _num(d[1]),
+                "nav": _num(d[2]),
+                "aum": _num(d[3]),
+                "flow_1m": _num(d[4]),
+            }
+        remaining = [t for t in remaining if t not in resolved]
+    if remaining:
+        log(f"WARN etf-flows: no TV row for {remaining}")
+    return resolved
+
+
+def build_etf_flows(history: dict, session_str: str,
+                    write_history: bool) -> dict | None:
+    """Fetch fund rows, update SO history, compute daily flows -> etf_flows.
+
+    flow_1d = (SO this session - SO previous session) x NAV — one reading per
+    session. streak = consecutive stored sessions (incl. latest) whose SO
+    delta had the same sign. Both null until 2 sessions of SO history exist.
+    Closed-day forced runs compute from live SO + stored history but do NOT
+    write new SO rows (same phantom-weekend-session rule as the rest of
+    history). Returns None when there is nothing to show at all.
+    """
+    live = fetch_etf_fund_rows()
+    etf_so = history.setdefault("etf_so", {})
+    funds = []
+    for ticker in ETF_FLOW_FUNDS:
+        row = live.get(ticker) or {}
+        so_now = row.get("so")
+        nav = row.get("nav")
+        fund_hist = etf_so.get(ticker)
+        if not isinstance(fund_hist, dict):
+            fund_hist = {}
+        if write_history and so_now is not None:
+            etf_so[ticker] = fund_hist
+            fund_hist[session_str] = {"so": so_now, "nav": nav}
+
+        # SO series, oldest->newest; live value stands in for today's row so
+        # a closed-day run still sees the freshest reading without storing it.
+        series = [(d, v["so"]) for d, v in sorted(fund_hist.items())
+                  if isinstance(v, dict) and isinstance(v.get("so"), (int, float))
+                  and d != session_str]
+        if so_now is not None:
+            series.append((session_str, so_now))
+        elif isinstance(fund_hist.get(session_str), dict):
+            stored = fund_hist[session_str]
+            if isinstance(stored.get("so"), (int, float)):
+                so_now = stored["so"]
+                series.append((session_str, so_now))
+                if nav is None and isinstance(stored.get("nav"), (int, float)):
+                    nav = stored["nav"]
+
+        flow_1d = None
+        baseline_session = None
+        streak = None
+        if len(series) >= 2 and nav is not None:
+            deltas = [b[1] - a[1] for a, b in zip(series, series[1:])]
+            flow_1d = deltas[-1] * nav
+            baseline_session = series[-2][0]
+            streak = 0
+            last_sign = (deltas[-1] > 0) - (deltas[-1] < 0)
+            if last_sign != 0:
+                for dlt in reversed(deltas):
+                    if ((dlt > 0) - (dlt < 0)) == last_sign:
+                        streak += 1
+                    else:
+                        break
+
+        if so_now is None and row.get("flow_1m") is None:
+            continue   # nothing at all to show for this fund this cycle
+        funds.append({
+            "ticker": ticker,
+            "flow_1d": flow_1d,
+            "baseline_session": baseline_session,
+            "streak": streak,
+            "flow_1m": row.get("flow_1m"),
+            "aum": row.get("aum"),
+            "so": so_now,
+            "nav": nav,
+        })
+    if not funds:
+        return None
+    return {"as_of_session": session_str, "funds": funds}
+
+
 # ── History (persistence across cycles) ─────────────────────────────────────
 
 def load_history(out_dir: Path) -> dict:
@@ -622,9 +768,10 @@ def load_history(out_dir: Path) -> dict:
             raise ValueError("not a dict")
         raw.setdefault("sessions", {})
         raw.setdefault("iv_history", {})
+        raw.setdefault("etf_so", {})
         return raw
     except Exception:
-        return {"sessions": {}, "iv_history": {}}
+        return {"sessions": {}, "iv_history": {}, "etf_so": {}}
 
 
 def save_history(out_dir: Path, history: dict) -> None:
@@ -635,6 +782,10 @@ def save_history(out_dir: Path, history: dict) -> None:
     for t, vals in history.get("iv_history", {}).items():
         if isinstance(vals, list) and len(vals) > MAX_IV_HISTORY:
             history["iv_history"][t] = vals[-MAX_IV_HISTORY:]
+    for t, rows in history.get("etf_so", {}).items():
+        if isinstance(rows, dict) and len(rows) > MAX_ETF_SO_SESSIONS:
+            for k in sorted(rows.keys())[:-MAX_ETF_SO_SESSIONS]:
+                del rows[k]
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "history.json"
     tmp = path.with_suffix(".json.tmp")
@@ -1066,6 +1217,13 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                                                 "score_conv": None})
         e.setdefault("direction", c["direction"])
 
+    # ── semi ETF flows context card (fail-soft: null on any failure) ────────
+    etf_flows = None
+    try:
+        etf_flows = build_etf_flows(history, session_str, write_history)
+    except Exception as e:
+        log(f"WARN etf-flows build failed: {e}")
+
     bullish_flow = sum(1 for v in by_ticker.values() if v["direction"] == "BULL")
     bearish_flow = sum(1 for v in by_ticker.values() if v["direction"] == "BEAR")
     firing_count = sum(1 for v in by_ticker.values() if v.get("firing"))
@@ -1089,6 +1247,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
             "firing": firing_count,
             "high_conviction": high_conviction,
         },
+        "etf_flows": etf_flows,
         "conviction": conviction_cards,
         "swing": swing_cards,
         "notes": {
@@ -1105,6 +1264,12 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
             "oi_confirm": ("OI-confirm checks whether yesterday's 2wk-6mo flow became "
                            "held positions: open interest up >=25% of yesterday's volume "
                            "= OPENING, down >=25% = CLOSING, else CHURN."),
+            "etf_flows": ("Semi ETF flows = day-over-day change in each fund's shares "
+                          "outstanding x NAV — real money entering or leaving the fund "
+                          "wrapper (ETFs create/destroy shares as money moves), one "
+                          "reading per session. Mixes retail and institutional money; "
+                          "context only, never a scoring input. 1M flow comes straight "
+                          "from TradingView."),
         },
     }
 

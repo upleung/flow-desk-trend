@@ -53,6 +53,22 @@ things get squeezed out of the same free feed to get closer:
 Both nudge the 0–100 scores a little (tilt: ±5 on conviction; OI-confirm: +5
 or −10 on swing) but never dominate them.
 
+## The semi ETF flows card (added 2026-07-19)
+
+A small card near the top of the page shows whether real invested money went
+**into or out of** the big semiconductor ETFs — SMH, SOXX, SOXL, SOXS, and
+DRAM — the previous session, plus each fund's one-month total. ETFs create
+and destroy shares as money enters and leaves, so the day-over-day change in
+a fund's share count times its price per share is a good estimate of the
+dollars that actually moved. When flows run the same direction several days
+in a row, the card shows the streak (e.g. "3d inflow").
+
+This answers a different question than the boards: the boards show what fast
+options traders are doing right now, while this card shows what slower money
+— retirement accounts, advisors, funds, and dip-buying retail — did
+yesterday. It updates once per session, mixes retail and institutional money
+together, and never affects any score. It's context, not a signal.
+
 ## Its limits
 
 - **Options data is 15 minutes delayed.** It's free CBOE data, not a live feed.
