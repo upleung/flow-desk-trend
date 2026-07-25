@@ -53,6 +53,25 @@ things get squeezed out of the same free feed to get closer:
 Both nudge the 0–100 scores a little (tilt: ±5 on conviction; OI-confirm: +5
 or −10 on swing) but never dominate them.
 
+## FLOW % — dollars, not contracts (added 2026-07-25)
+
+Each conviction card shows two put/call readings side by side, and they answer
+different questions:
+
+- **C/P** counts **contracts**. 2.35x means 2.35 calls traded for every put.
+- **FLOW %** counts **dollars**. "73% PUT" means 73 cents of every dollar of
+  option premium that changed hands today went to the put side.
+
+They can disagree badly, and when they do the dollars are usually the honest
+read. A near-money put on a $920 stock with expensive volatility can cost
+several times what a call costs, so the put side can soak up most of the money
+while the contract count looks balanced. MU on Jul 24 2026 did exactly that —
+a roughly even contract ratio sitting on a heavily put-weighted premium book.
+FLOW % is what commercial flow desks show, and it's why their boards flagged
+MU as put-heavy when a contract-count read called it neutral.
+
+FLOW % is display only — it doesn't move the 0–100 score.
+
 ## The semi ETF flows card (added 2026-07-19)
 
 A small card near the top of the page shows whether real invested money went

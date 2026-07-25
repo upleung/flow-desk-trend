@@ -17,7 +17,7 @@ PIPELINE (letters match the build spec)
 (b) Resolve every pinned name to a live TV quote via a SELF-HEALING exchange
     probe (try NASDAQ:, then NYSE:, then AMEX:, then CBOE: batch quote calls)
     rather than a hand-maintained ticker->exchange dict — a live check found
-    COHR on NYSE (not NASDAQ) and the memory/semi ETFs DRAM/RAM/SKHX on Cboe
+    COHR on NYSE (not NASDAQ) and the memory/semi ETFs DRAM/RAM on Cboe
     BZX, so trusting one static dict would silently drop pinned names.
 (c) No pre-score cut — every resolved pinned name gets a CBOE chain pulled,
     in PINNED order (the point of the curated list is to show Zach's names).
@@ -247,7 +247,12 @@ WATCHLIST = [
     # Semiconductor / memory cluster off his TradingView watchlist
     "SMH", "SOXL", "SOXS",        # semi ETFs (broad + 3x bull/bear)
     "MUU",                        # Direxion 2x Long MU
-    "SKHX",                       # Leverage Shares 2x Long SK Hynix (US-listed proxy)
+    # SK Hynix: the sponsored ADR, NOT the 2x ETF. Swapped 2026-07-25 —
+    # SKHX (Leverage Shares 2x Long SK Hynix) carried 352 contracts / 195
+    # total volume on the Cboe chain versus SKHY's 2,600 / 167k, so the
+    # leveraged wrapper was scoring noise while the liquid SK Hynix options
+    # venue sat off the board.
+    "SKHY",                       # SK hynix Inc. sponsored ADR (NASDAQ)
     "SNDK",                       # Sandisk
     "DRAM",                       # Roundhill Memory ETF
     "RAM",                        # Roundhill T-REX 2x Long DRAM ETF
@@ -324,7 +329,7 @@ def _row_to_quote(sym_field: str, d: list) -> dict | None:
     rvol = _num(_COL["relative_volume_10d_calc"])
     # A pinned name only needs a live price to be usable — the curated model
     # doesn't pre-score, so a missing rvol/change (common on thinly-traded new
-    # leveraged ETFs like SKHX) must not drop the name. Both are None-tolerant
+    # leveraged ETFs like MUU/RAM) must not drop the name. Both are None-tolerant
     # downstream (rvol/change default to 0.0; SMA-less trend falls to MIXED).
     if close is None:
         return None
@@ -348,8 +353,8 @@ def _resolve_core_tv(missing: list[str]) -> dict[str, dict]:
     """Self-healing exchange probe for pinned tickers.
 
     Tries NASDAQ -> NYSE -> AMEX -> CBOE batch quote calls; a ticker only
-    needs one successful match. CBOE covers the memory/semi ETFs (DRAM, RAM,
-    SKHX) that list on Cboe BZX. Fail-soft per exchange call.
+    needs one successful match. CBOE covers the memory/semi ETFs (DRAM, RAM)
+    that list on Cboe BZX. Fail-soft per exchange call.
     """
     resolved: dict[str, dict] = {}
     remaining = list(missing)
@@ -588,6 +593,21 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
 
     net_flow = short_calls_prem - short_puts_prem
     cp_ratio = (short_calls_vol / short_puts_vol) if short_puts_vol > 0 else None
+
+    # Premium-weighted flow share (added 2026-07-25). cp_ratio counts CONTRACTS;
+    # this counts DOLLARS, and the two can disagree sharply — MU on 2026-07-24
+    # printed a near-1.0 contract ratio while the put side carried far more
+    # premium, because near-money puts on a $920 stock at ~100% IV cost many
+    # times what the calls did. Reported the way InsiderFinance shows it:
+    # whichever side holds the larger share of premium, as a percentage.
+    # Display only — it is NOT a scoring input (weights unchanged).
+    _prem_total = short_calls_prem + short_puts_prem
+    if _prem_total > 0:
+        _put_share = short_puts_prem / _prem_total
+        flow_side = "PUT" if _put_share >= 0.5 else "CALL"
+        flow_pct = round((_put_share if _put_share >= 0.5 else 1 - _put_share) * 100, 1)
+    else:
+        flow_side, flow_pct = None, None
     sum_vol_0_7 = short_calls_vol + short_puts_vol
     sum_oi_0_7_total = short_calls_oi + short_puts_oi
     direction = "BULL" if net_flow >= 0 else "BEAR"
@@ -618,6 +638,8 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
         "direction": direction,
         "net_flow": net_flow,
         "cp_ratio": cp_ratio,
+        "flow_pct": flow_pct,
+        "flow_side": flow_side,
         "sum_vol_0_7": sum_vol_0_7,
         "sum_oi_0_7_total": sum_oi_0_7_total,
         "sum_oi_0_7_directional": sum_oi_directional,
@@ -1140,6 +1162,8 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                 "spot": spot,
                 "net_flow": net_flow,
                 "cp_ratio": analysis["cp_ratio"],
+                "flow_pct": analysis["flow_pct"],
+                "flow_side": analysis["flow_side"],
                 "rvol": quote["rvol"],
                 "change_pct": quote["change_pct"],
                 "tilt": round(tilt, 3) if tilt is not None else None,
@@ -1261,6 +1285,12 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                      "accumulates the day's classified premium: calls bought + puts sold "
                      "= bullish, calls sold + puts bought = bearish. It samples one trade "
                      "per contract per ~7-min cycle — a sampled proxy, not the full tape."),
+            "flow_pct": ("Flow % is the premium-weighted put/call split for 0-7 DTE: "
+                         "whichever side holds the larger share of the dollars traded, "
+                         "shown as a percentage. C/P counts contracts, Flow % counts "
+                         "dollars — they disagree when one side's options are far more "
+                         "expensive, which is how a put-heavy day can hide behind a "
+                         "balanced contract ratio. Display only, not a scoring input."),
             "oi_confirm": ("OI-confirm checks whether yesterday's 2wk-6mo flow became "
                            "held positions: open interest up >=25% of yesterday's volume "
                            "= OPENING, down >=25% = CLOSING, else CHURN."),

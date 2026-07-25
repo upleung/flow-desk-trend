@@ -47,6 +47,7 @@ string sentinel). All strings are already plain (frontend still escapes on rende
     "flow_proxy": "Net flow = call premium traded minus put premium traded (volume x last x 100). Free data can't see buy/sell side — this is premium changing hands, not directional order flow.",
     "delay": "Options data is 15-minute delayed (CBOE free feed). Stock prices update live every 30s (TradingView Cboe One).",
     "tilt": "…methodology one-liner for the aggressor tilt (see build_snapshot.py header)…",
+    "flow_pct": "…methodology one-liner for the premium-weighted put/call split…",
     "oi_confirm": "…methodology one-liner for OI-confirm…",
     "etf_flows": "…methodology one-liner for the semi ETF flows card…"
   }
@@ -79,6 +80,14 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "spot_at_alert": 851.10,         // spot when first appeared on this board today (from history); null if new-this-cycle
   "net_flow": 4250000.0,           // signed $, 0-7 DTE (call prem - put prem)
   "cp_ratio": 2.35,                // call vol / put vol, 0-7 DTE; null if no put vol
+  "flow_pct": 73.0,                // premium-weighted put/call split, 0-7 DTE: the DOMINANT
+                                   // side's share of total premium traded, 50.0-100.0, 1dp.
+                                   // Pairs with flow_side. Both null if no premium traded.
+                                   // cp_ratio counts contracts, flow_pct counts dollars —
+                                   // they diverge when one side's options are far pricier.
+                                   // Display only; not a scoring input.
+  "flow_side": "PUT",              // "CALL" | "PUT" — which side flow_pct refers to; ties
+                                   // (exactly 50/50) resolve to "PUT". null if no premium.
   "rvol": 1.04,                    // relative_volume_10d_calc from TV
   "change_pct": -0.66,             // TV change (day % )
   "tilt": 0.64,                    // aggressor tilt, -1..+1: day-accumulated sampled buy/sell
