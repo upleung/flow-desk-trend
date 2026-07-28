@@ -81,13 +81,26 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "net_flow": 4250000.0,           // signed $, 0-7 DTE (call prem - put prem)
   "cp_ratio": 2.35,                // call vol / put vol, 0-7 DTE; null if no put vol
   "flow_pct": 73.0,                // premium-weighted put/call split, 0-7 DTE: the DOMINANT
-                                   // side's share of total premium traded, 50.0-100.0, 1dp.
-                                   // Pairs with flow_side. Both null if no premium traded.
+                                   // side's share of NEAR-MONEY premium traded (strikes within
+                                   // MONEYNESS_BAND = ±20% of spot), 50.0-100.0, 1dp.
+                                   // Pairs with flow_side. Both null if no near-money premium
+                                   // traded, or if spot is unknown (fails closed — with no spot
+                                   // a stock-replacement strike is indistinguishable from a bet).
                                    // cp_ratio counts contracts, flow_pct counts dollars —
                                    // they diverge when one side's options are far pricier.
+                                   // NEAR-MONEY SINCE 2026-07-28: premium is intrinsic +
+                                   // extrinsic value, so weighting the whole bucket let deep-ITM
+                                   // stock-replacement paper dominate (LLY 2026-07-27: seven
+                                   // Jul-31 strikes ~35% below a ~$1,205 spot, ~101% of price
+                                   // intrinsic, were 79% of all call premium and produced a bogus
+                                   // "84% CALL"). Band-only reads 60.1%; an independent
+                                   // ">=90% intrinsic" filter reads 60.4%. NOTE net_flow above
+                                   // is still whole-bucket and carries the same distortion — it
+                                   // is a scoring input, so changing it is a separate decision.
                                    // Display only; not a scoring input.
   "flow_side": "PUT",              // "CALL" | "PUT" — which side flow_pct refers to; ties
-                                   // (exactly 50/50) resolve to "PUT". null if no premium.
+                                   // (exactly 50/50) resolve to "PUT". null if no near-money
+                                   // premium, or if spot is unknown.
   "rvol": 1.04,                    // relative_volume_10d_calc from TV
   "change_pct": -0.66,             // TV change (day % )
   "tilt": 0.64,                    // aggressor tilt, -1..+1: day-accumulated sampled buy/sell

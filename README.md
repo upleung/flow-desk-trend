@@ -70,7 +70,30 @@ a roughly even contract ratio sitting on a heavily put-weighted premium book.
 FLOW % is what commercial flow desks show, and it's why their boards flagged
 MU as put-heavy when a contract-count read called it neutral.
 
-FLOW % is display only — it doesn't move the 0–100 score.
+**Near-the-money only, since Jul 28 2026.** FLOW % counts dollars traded on
+strikes within 20% of the current price, and ignores everything further out.
+Here's why. An option deep in the money costs almost exactly what it's already
+worth — a call to buy a $1,200 stock at $790 costs about $410 no matter what
+anyone thinks happens next. It's a way of holding the stock, not a bet on it.
+Count those dollars and a handful of contracts can drown out the entire real
+book. LLY on Jul 27 2026 did exactly that: seven such call strikes, about 330
+contracts between them, were 79% of all the call money and made the card read
+84% CALL. The honest number was 60%. (The contract count was misleading in the
+opposite direction the same day — 82% of the put contracts were penny options
+miles from the price, padding the count with noise.)
+
+Two separate ways of throwing out that paper — the 20% band, and simply
+dropping anything whose price is nearly all built-in value — landed within
+0.3 of a point of each other, which is why the number is trustworthy now.
+
+If nothing traded near the money, the card shows a dash rather than a number
+nobody could defend.
+
+FLOW % is display only — it doesn't move the 0–100 score. **NET FLOW still
+counts the whole 0–7 day bucket**, so it can still be inflated by that same
+deep-in-the-money paper — LLY's read +$15.5M where the near-money figure was
++$1.0M. Changing NET FLOW would change every score and every stored history
+row, so it's a separate decision, not folded into this one.
 
 ## The semi ETF flows card (added 2026-07-19)
 

@@ -482,6 +482,10 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
     spot = chain["spot"]
     short_calls_vol = short_puts_vol = 0.0
     short_calls_prem = short_puts_prem = 0.0
+    # Near-money-only premium, the basis for FLOW % (see the flow_pct block
+    # below). Deliberately separate from short_*_prem so net_flow — which IS a
+    # scoring input — keeps its existing whole-bucket definition.
+    short_calls_prem_nm = short_puts_prem_nm = 0.0
     short_calls_oi = short_puts_oi = 0.0
     popular = None       # (premium, contract_dict)
     swing_candidates: list[tuple[float, dict]] = []  # (premium, contract) 0.30<=|delta|<=0.60
@@ -554,6 +558,10 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
                 short_puts_oi += oi
 
             if spot and spot > 0 and abs(strike / spot - 1) <= MONEYNESS_BAND:
+                if cp == "C":
+                    short_calls_prem_nm += premium
+                else:
+                    short_puts_prem_nm += premium
                 if popular is None or premium > popular[0]:
                     popular = (premium, {
                         "side": "CALL" if cp == "C" else "PUT",
@@ -601,9 +609,28 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
     # times what the calls did. Reported the way InsiderFinance shows it:
     # whichever side holds the larger share of premium, as a percentage.
     # Display only — it is NOT a scoring input (weights unchanged).
-    _prem_total = short_calls_prem + short_puts_prem
+    #
+    # NEAR-MONEY ONLY since 2026-07-28 (Zach flagged LLY printing C/P 4.06
+    # put-heavy against 84% CALL in dollars). Premium is intrinsic + extrinsic
+    # value; on a deep-ITM contract it is almost all intrinsic, so weighting
+    # the whole bucket by dollars measures how far in the money somebody's
+    # stock-replacement paper sits, not conviction. On LLY's 2026-07-27 chain
+    # (spot ~$1,205) seven Jul-31 call strikes at $780-$910 — ~35% below spot,
+    # ~330 contracts at ~$400 each, ~101% of price intrinsic — were 79% of all
+    # call premium. Restricting to MONEYNESS_BAND gives 60.1% CALL; the
+    # independent "drop anything >=90% intrinsic" filter gives 60.4%. Two
+    # unrelated filters within 0.3pp is the evidence.
+    #
+    # Subtracting intrinsic value instead was measured and REJECTED: last is
+    # the trade-time price while spot is now, so the subtraction mixes clocks
+    # and drove computed intrinsic to 101-106% OF THE TRADED PRICE on a dozen
+    # LLY contracts (extrinsic clamped to 0, deleting real premium). Across
+    # this 30-name universe it flipped side on 11-12 names, 4 of them merely
+    # by reading mid instead of last. The band flipped 2 and is immune — a 1%
+    # spot move cannot reclassify a 35%-ITM strike.
+    _prem_total = short_calls_prem_nm + short_puts_prem_nm
     if _prem_total > 0:
-        _put_share = short_puts_prem / _prem_total
+        _put_share = short_puts_prem_nm / _prem_total
         flow_side = "PUT" if _put_share >= 0.5 else "CALL"
         flow_pct = round((_put_share if _put_share >= 0.5 else 1 - _put_share) * 100, 1)
     else:
