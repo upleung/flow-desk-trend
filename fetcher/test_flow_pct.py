@@ -233,3 +233,48 @@ def test_build_etf_flows_still_reports_an_ordinary_day(monkeypatch):
     fund = out["funds"][0]
     assert fund["split_suppressed"] is False
     assert fund["flow_1d"] == pytest.approx(200_000 * 531.35)
+
+
+def test_build_etf_flows_labels_the_flow_session_not_the_capture_date():
+    """ONE-SESSION PUBLICATION LAG (measured 2026-07-28): the vendor record read
+    during session S carries the official shares/NAV struck at the close of S-1.
+    The arithmetic is unaffected, but labelling a flow with the capture date
+    claims a day of freshness it does not have."""
+    import build_snapshot as bs
+    import pytest as _pytest
+
+    monkey = _pytest.MonkeyPatch()
+    try:
+        monkey.setattr(bs, "ETF_FLOW_FUNDS", ["SMH"])
+        monkey.setattr(bs, "fetch_etf_fund_rows",
+                       lambda: {"SMH": {"so": 10_200_000.0, "nav": 531.35,
+                                        "aum": None, "flow_1m": None}})
+        hist = {"etf_so": {"SMH": {"2026-07-27": {"so": 10_000_000.0,
+                                                  "nav": 528.00}}}}
+        out = bs.build_etf_flows(hist, "2026-07-28", write_history=False)
+    finally:
+        monkey.undo()
+
+    assert out["as_of_session"] == "2026-07-28", "capture date is still reported"
+    assert out["flow_session"] == "2026-07-27", "the flow belongs to Jul 27"
+    assert out["funds"][0]["flow_session"] == "2026-07-27"
+
+
+def test_near_money_premium_inputs_are_exposed_for_archival():
+    """FLOW % is a ratio; a ratio cannot be re-weighted or re-derived after the
+    fact. The accuracy backtest (2026-07-28) found history had stored only
+    net_flow and gross premium, so not one day of historical FLOW % existed.
+    These two fields are what make a future determination possible."""
+    spot = 100.0
+    options = [
+        _opt("T", EXP, "C", 100.0, 200, 2.0),      # $40k near-money calls
+        _opt("T", EXP, "P", 100.0, 300, 2.0),      # $60k near-money puts
+        _opt("T", EXP, "C", 40.0, 50, 60.0),       # deep ITM — excluded
+    ]
+    a = analyze_ticker("T", _chain(spot, options), SESSION)
+    assert a["nm_call_prem_0_7"] == pytest.approx(40_000.0)
+    assert a["nm_put_prem_0_7"] == pytest.approx(60_000.0)
+    # and they must reproduce the published ratio exactly
+    tot = a["nm_call_prem_0_7"] + a["nm_put_prem_0_7"]
+    assert round(100 * a["nm_put_prem_0_7"] / tot, 1) == pytest.approx(a["flow_pct"])
+    assert a["flow_side"] == "PUT"

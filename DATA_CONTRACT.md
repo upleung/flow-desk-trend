@@ -188,6 +188,14 @@ string sentinel). All strings are already plain (frontend still escapes on rende
         "net_flow_0_7": 4250000.0,   // signed
         "sum_oi_0_7": 210000,        // aggregate OI in the flow direction (contracts)
         "gross_prem_0_7": 10600000.0, // calls+puts premium, 0-7 DTE (denominator for flow_5d_pct)
+        "nm_call_prem_0_7": 2832000.0,// NEAR-MONEY call premium, 0-7 DTE (added 2026-07-28)
+        "nm_put_prem_0_7": 1882000.0, // NEAR-MONEY put premium, 0-7 DTE
+                                      // These are the two inputs FLOW % is computed from. Archived
+                                      // because the accuracy backtest found history stored only
+                                      // net_flow and gross premium, so no historical FLOW % could be
+                                      // reconstructed and its predictive value was untestable. Absent
+                                      // on sessions written before 2026-07-28 — readers must treat a
+                                      // missing key as unknown, never as zero.
         "iv30": 0.98,
         "direction": "BULL",
         "tilt_bull_prem": 2100000.0, // day-accumulated classified bullish premium (calls bought + puts sold)

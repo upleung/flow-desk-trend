@@ -667,6 +667,10 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
         "cp_ratio": cp_ratio,
         "flow_pct": flow_pct,
         "flow_side": flow_side,
+        # The two inputs behind flow_pct, exposed so history can archive them
+        # (flow_pct alone is not reconstructible or re-weightable after the fact)
+        "nm_call_prem_0_7": short_calls_prem_nm,
+        "nm_put_prem_0_7": short_puts_prem_nm,
         "sum_vol_0_7": sum_vol_0_7,
         "sum_oi_0_7_total": sum_oi_0_7_total,
         "sum_oi_0_7_directional": sum_oi_directional,
@@ -859,10 +863,28 @@ def build_etf_flows(history: dict, session_str: str,
             "so": so_now,
             "nav": nav,
             "split_suppressed": split_suppressed,
+            "flow_session": baseline_session,
         })
     if not funds:
         return None
-    return {"as_of_session": session_str, "funds": funds}
+    # ONE-SESSION PUBLICATION LAG (measured 2026-07-28). The vendor's shares/NAV
+    # record read during session S carries the OFFICIAL figures struck at the
+    # close of S-1 — NAV is computed after the close and published next morning.
+    # Verified on this repo's own etf_so history: pairing the stamped NAV with
+    # the PRIOR session's close gives a 0.052% median error versus 2.187%
+    # against the same session's close (30 pairs, 5 funds; SOXL/SOXS matched to
+    # 0.01-0.05%). The flow ARITHMETIC is unaffected — both inputs carry the
+    # same lag, so consecutive captures still difference to a true one-session
+    # share change priced at that session's NAV. Only the LABEL was wrong:
+    # `as_of_session` was the capture date, which claimed a day of freshness the
+    # number does not have. `flow_session` per fund is the session the flow
+    # actually belongs to; the site labels off that.
+    sessions = [f["flow_session"] for f in funds if f.get("flow_session")]
+    return {
+        "as_of_session": session_str,          # capture session (kept, unchanged)
+        "flow_session": max(sessions) if sessions else None,
+        "funds": funds,
+    }
 
 
 # ── History (persistence across cycles) ─────────────────────────────────────
@@ -1089,6 +1111,15 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                 "net_flow_0_7": net_flow,
                 "sum_oi_0_7": analysis["sum_oi_0_7_directional"],
                 "gross_prem_0_7": analysis["total_premium_0_7"],   # calls+puts prem (for flow_5d %)
+                # Near-money per-side premium — the two numbers FLOW % is built
+                # from. Stored 2026-07-28 to close an archival gap the accuracy
+                # backtest ran into: history kept only net_flow and gross
+                # premium, so NOT ONE DAY of historical FLOW % could be
+                # reconstructed and its predictive value was untestable. With
+                # these, a determination becomes possible after ~30 sessions
+                # (see market-data/results/flow_accuracy_2026-07.md).
+                "nm_call_prem_0_7": analysis["nm_call_prem_0_7"],
+                "nm_put_prem_0_7": analysis["nm_put_prem_0_7"],
                 "iv30": analysis["iv30"],
                 "direction": direction,
                 "tilt_bull_prem": tilt_bull_day,
