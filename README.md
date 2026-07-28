@@ -111,6 +111,16 @@ options traders are doing right now, while this card shows what slower money
 yesterday. It updates once per session, mixes retail and institutional money
 together, and never affects any score. It's context, not a signal.
 
+**Splits show "split — n/a" (added Jul 28 2026).** A fund split changes the
+share count without a dollar moving, so on a split day the share-count method
+can't tell you anything. SOXL and SOXS reverse-split routinely, and a 1-for-10
+reverse split would otherwise print an outflow of roughly 90% of the fund on a
+day nobody sold anything — the same kind of fake number as the CRWD split that
+produced a bogus −74.9% in the Jul 1 2026 morning brief. The card detects it
+(share count and price per share moving by opposite, matching factors) and
+withholds the number rather than showing a zero, because a flat day isn't what
+was observed either.
+
 ## Its limits
 
 - **Options data is 15 minutes delayed.** It's free CBOE data, not a live feed.

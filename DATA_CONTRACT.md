@@ -31,13 +31,24 @@ string sentinel). All strings are already plain (frontend still escapes on rende
       {
         "ticker": "SMH",
         "flow_1d": -123456789.0,      // (shares outstanding this session - previous session) x NAV, signed $;
-                                      // null until 2 sessions of SO history exist ("collecting")
+                                      // null until 2 sessions of SO history exist ("collecting"), and also
+                                      // null when split_suppressed is true (see below)
         "baseline_session": "2026-07-17",  // session the SO baseline came from; null when flow_1d is null
         "streak": 3,                  // consecutive sessions (incl. latest) of same-sign daily flow; null when flow_1d is null
+                                      // split days contribute a 0 delta, so they break a streak rather than extend it
         "flow_1m": -4800472730.0,     // trailing 1-month net flow $, straight from TV fund_flows.1M; null if TV omits it
         "aum": 71093689042.6,         // fund AUM $ (TV); null if TV omits it
         "so": 120391874,              // shares outstanding this session
-        "nav": 568.67                 // NAV per share (TV); the $ multiplier for flow_1d
+        "nav": 568.67,                // NAV per share (TV); the $ multiplier for flow_1d
+        "split_suppressed": false     // true when this session's SO change looks like a SPLIT, not creations
+                                      // (added 2026-07-28). SO and NAV moving by reciprocal factors at a listed
+                                      // split ratio (within 8%) is a split: the share count changed and NO money
+                                      // moved. Read naively a 1-for-10 reverse split — routine for SOXL/SOXS —
+                                      // prints an outflow of ~90% of the fund's AUM, the same fabricated number
+                                      // class as the CRWD 4-for-1 fake -74.9%. When a NAV is missing the split
+                                      // cannot be confirmed, so a split-shaped SO ratio still suppresses.
+                                      // flow_1d goes null (NOT 0 — a flat day was not observed); the site
+                                      // renders "split — n/a".
       }
     ]
   },

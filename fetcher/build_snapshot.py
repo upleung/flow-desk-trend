@@ -734,6 +734,48 @@ def fetch_etf_fund_rows() -> dict[str, dict]:
     return resolved
 
 
+
+# ── Split detection for the SO-based flow maths ──────────────────────────────
+# flow_1d = ΔSO x NAV is only "money in or out" while the share count changes
+# for creation/redemption reasons. A split also changes it, by a lot: SOXS and
+# SOXL are leveraged funds that reverse-split routinely, and a 1-for-10 reverse
+# split divides SO by 10 overnight. Read naively that prints an outflow of ~90%
+# of the fund's AUM on a day when nobody moved a dollar — the same fabricated
+# headline as the CRWD 4-for-1 that produced a fake -74.9% in the Jul 1 2026
+# morning brief. A split moves SO and NAV by reciprocal factors, so the product
+# of the two ratios stays ~1 while each is far from 1.
+_SPLIT_RATIOS = (2, 3, 4, 5, 6, 8, 10, 20)
+_SPLIT_TOL = 0.08            # same 8% band the brief's price reconciler uses
+
+
+def _ratio_near_split(ratio: float) -> bool:
+    for r in _SPLIT_RATIOS:
+        for cand in (float(r), 1.0 / r):
+            if abs(ratio / cand - 1.0) <= _SPLIT_TOL:
+                return True
+    return False
+
+
+def _so_delta_is_split(so0, so1, nav0, nav1) -> bool:
+    """True when an SO jump is a split rather than creations/redemptions.
+
+    Needs both NAVs to confirm. When a NAV is missing we cannot confirm, so an
+    SO ratio sitting on a split factor is treated as a SUSPECTED split and the
+    flow is withheld — for a display-only card, a dash beats a fabricated
+    multi-billion number.
+    """
+    if not (isinstance(so0, (int, float)) and isinstance(so1, (int, float))
+            and so0 > 0 and so1 > 0):
+        return False
+    so_ratio = so1 / so0
+    if not _ratio_near_split(so_ratio):
+        return False
+    if (isinstance(nav0, (int, float)) and isinstance(nav1, (int, float))
+            and nav0 > 0 and nav1 > 0):
+        return abs(so_ratio * (nav1 / nav0) - 1.0) <= _SPLIT_TOL
+    return True          # unconfirmable but split-shaped -> withhold
+
+
 def build_etf_flows(history: dict, session_str: str,
                     write_history: bool) -> dict | None:
     """Fetch fund rows, update SO history, compute daily flows -> etf_flows.
@@ -761,25 +803,40 @@ def build_etf_flows(history: dict, session_str: str,
 
         # SO series, oldest->newest; live value stands in for today's row so
         # a closed-day run still sees the freshest reading without storing it.
-        series = [(d, v["so"]) for d, v in sorted(fund_hist.items())
+        # NAV rides along per session so splits can be detected (see
+        # _so_delta_is_split) — a split is not a flow.
+        series = [(d, v["so"], v.get("nav")) for d, v in sorted(fund_hist.items())
                   if isinstance(v, dict) and isinstance(v.get("so"), (int, float))
                   and d != session_str]
         if so_now is not None:
-            series.append((session_str, so_now))
+            series.append((session_str, so_now, nav))
         elif isinstance(fund_hist.get(session_str), dict):
             stored = fund_hist[session_str]
             if isinstance(stored.get("so"), (int, float)):
                 so_now = stored["so"]
-                series.append((session_str, so_now))
                 if nav is None and isinstance(stored.get("nav"), (int, float)):
                     nav = stored["nav"]
+                series.append((session_str, so_now, nav))
 
         flow_1d = None
         baseline_session = None
         streak = None
+        split_suppressed = False
         if len(series) >= 2 and nav is not None:
-            deltas = [b[1] - a[1] for a, b in zip(series, series[1:])]
-            flow_1d = deltas[-1] * nav
+            deltas = []
+            for a, b in zip(series, series[1:]):
+                if _so_delta_is_split(a[1], b[1], a[2], b[2]):
+                    deltas.append(0.0)      # split: no money moved
+                else:
+                    deltas.append(b[1] - a[1])
+            split_suppressed = _so_delta_is_split(
+                series[-2][1], series[-1][1], series[-2][2], series[-1][2])
+            if split_suppressed:
+                # Don't print 0 either — that asserts a flat day we didn't
+                # observe. The card shows a dash and the reason.
+                flow_1d = None
+            else:
+                flow_1d = deltas[-1] * nav
             baseline_session = series[-2][0]
             streak = 0
             last_sign = (deltas[-1] > 0) - (deltas[-1] < 0)
@@ -801,6 +858,7 @@ def build_etf_flows(history: dict, session_str: str,
             "aum": row.get("aum"),
             "so": so_now,
             "nav": nav,
+            "split_suppressed": split_suppressed,
         })
     if not funds:
         return None

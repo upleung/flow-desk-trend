@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_snapshot import analyze_ticker, MONEYNESS_BAND  # noqa: E402
+from build_snapshot import (  # noqa: E402
+    analyze_ticker, MONEYNESS_BAND, _so_delta_is_split, build_etf_flows)
 
 SESSION = date(2026, 7, 27)
 
@@ -154,3 +155,81 @@ def test_contracts_outside_the_dte_bucket_never_count():
     a = analyze_ticker("T", _chain(spot, options), SESSION)
     assert a["flow_side"] == "CALL"
     assert a["flow_pct"] == pytest.approx(100.0)
+
+
+# ── SO-based ETF flow: split guard (added 2026-07-28) ────────────────────────
+# flow_1d = ΔSO x NAV is only money-in/out while the share count moves for
+# creation/redemption reasons. SOXL and SOXS reverse-split routinely, and a
+# 1-for-10 divides SO by 10 overnight -> a naive read prints an outflow of ~90%
+# of the fund's AUM on a day nobody moved a dollar. Same fabricated-number
+# class as the CRWD 4-for-1 that printed a fake -74.9% in the Jul 1 2026 brief.
+@pytest.mark.parametrize("ratio", [2, 3, 4, 5, 6, 8, 10, 20])
+def test_reverse_split_detected_from_reciprocal_so_and_nav(ratio):
+    assert _so_delta_is_split(1_000_000.0, 1_000_000.0 / ratio, 20.0, 20.0 * ratio)
+
+
+@pytest.mark.parametrize("ratio", [2, 3, 4, 10])
+def test_forward_split_detected(ratio):
+    assert _so_delta_is_split(1_000_000.0, 1_000_000.0 * ratio, 400.0, 400.0 / ratio)
+
+
+def test_real_creations_are_not_a_split():
+    """SO up 3% with NAV essentially flat is money in, and must survive."""
+    assert not _so_delta_is_split(1_000_000.0, 1_030_000.0, 20.0, 20.10)
+
+
+def test_big_real_redemption_is_not_a_split():
+    """SO halves while NAV barely moves -> a genuine, large outflow."""
+    assert not _so_delta_is_split(1_000_000.0, 500_000.0, 20.0, 20.05)
+
+
+def test_split_shaped_move_without_nav_is_withheld():
+    """Cannot confirm without both NAVs; split-shaped means withhold rather
+    than print a probably-fabricated number."""
+    assert _so_delta_is_split(1_000_000.0, 100_000.0, None, 20.0)
+    assert _so_delta_is_split(1_000_000.0, 100_000.0, 20.0, None)
+
+
+def test_non_split_ratio_without_nav_is_kept():
+    """A 3% move is not a split factor, so a missing NAV must not hide it."""
+    assert not _so_delta_is_split(1_000_000.0, 1_030_000.0, None, None)
+
+
+def test_bad_inputs_are_not_splits():
+    for args in ((0, 100, 1, 1), (100, 0, 1, 1), (None, 100, 1, 1),
+                 ("x", 100, 1, 1)):
+        assert not _so_delta_is_split(*args)
+
+
+def _etf_history(rows):
+    """rows: {ticker: {session: {"so":..,"nav":..}}}"""
+    return {"etf_so": rows}
+
+
+def test_build_etf_flows_withholds_the_flow_on_a_split(monkeypatch):
+    import build_snapshot as bs
+    monkeypatch.setattr(bs, "ETF_FLOW_FUNDS", ["SOXS"])
+    # live row: post-reverse-split SO and NAV
+    monkeypatch.setattr(bs, "fetch_etf_fund_rows",
+                        lambda: {"SOXS": {"so": 1_000_000.0, "nav": 615.10,
+                                          "aum": None, "flow_1m": None}})
+    hist = _etf_history({"SOXS": {"2026-07-27": {"so": 10_000_000.0,
+                                                 "nav": 61.51}}})
+    out = bs.build_etf_flows(hist, "2026-07-28", write_history=False)
+    fund = out["funds"][0]
+    assert fund["split_suppressed"] is True
+    assert fund["flow_1d"] is None, "a split must never print as a flow"
+
+
+def test_build_etf_flows_still_reports_an_ordinary_day(monkeypatch):
+    import build_snapshot as bs
+    monkeypatch.setattr(bs, "ETF_FLOW_FUNDS", ["SMH"])
+    monkeypatch.setattr(bs, "fetch_etf_fund_rows",
+                        lambda: {"SMH": {"so": 10_200_000.0, "nav": 531.35,
+                                         "aum": None, "flow_1m": None}})
+    hist = _etf_history({"SMH": {"2026-07-27": {"so": 10_000_000.0,
+                                                "nav": 528.00}}})
+    out = bs.build_etf_flows(hist, "2026-07-28", write_history=False)
+    fund = out["funds"][0]
+    assert fund["split_suppressed"] is False
+    assert fund["flow_1d"] == pytest.approx(200_000 * 531.35)
