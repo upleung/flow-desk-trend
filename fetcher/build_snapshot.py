@@ -209,6 +209,36 @@ OI_CONFIRM_MIN_VOL = 500     # yesterday side volume below this -> null (can't j
 OI_CONFIRM_OPEN_ADJ = 5      # swing score bonus on OPENING (directions matching)
 OI_CONFIRM_CLOSE_ADJ = -10   # swing score penalty on CLOSING (directions matching)
 
+# ── Biggest-orders board (added 2026-07-31) ─────────────────────────────────
+# A cross-ticker leaderboard of the single options contracts with the most
+# DOLLARS traded today, the way commercial "big flow" feeds present one.
+#
+# WHAT IT IS NOT: a single order. Those feeds rank individual blocks/sweeps off
+# a trade-level tape, which is paid. The free CBOE feed publishes per-contract
+# session aggregates, so a row here is one contract's WHOLE DAY (volume x last
+# x 100) — the closest honest thing free data supports. Never label it as an
+# order, and never present a row as evidence of who initiated: premium changing
+# hands has no buy/sell side on this data (same caveat as net_flow).
+#
+# NEAR-MONEY ONLY, for exactly the reason FLOW % is (see analyze_ticker):
+# premium is intrinsic + extrinsic, so a deep-ITM strike costs nearly what it
+# is already worth. A handful of those carry enormous dollars while betting on
+# nothing and would permanently own the top of the board — unfiltered, seven
+# ~35%-ITM strikes were 79% of LLY's call premium on 2026-07-27. Don't widen
+# MONEYNESS_BAND here to "show more names".
+BIG_ORDERS_CAP = 12             # rows published, and the per-ticker shortlist size.
+                                # Equal on purpose: a ticker can supply at most
+                                # CAP rows to a CAP-row board, so shortlisting
+                                # per ticker cannot change the merged ranking —
+                                # no hidden per-ticker quota, and a genuinely
+                                # loud name may take several rows.
+BIG_ORDERS_MIN_PREMIUM = 100_000.0   # $ floor; a quiet session publishes a short
+                                     # board rather than padding it with noise
+BIG_ORDERS_DTE_HI = 183         # 0..183 inclusive — the UNION of the two scoring
+                                # buckets (0-7 and 14-183), so this board does not
+                                # inherit their 8-13 day blind spot
+MAX_BIG_ORDERS_SESSIONS = 60    # history cap, same horizon as sessions/iv_history
+
 # ── Semi ETF share-flow context card (added 2026-07-19) ─────────────────────
 # Daily fund flows estimated from day-over-day shares-outstanding deltas:
 # ETFs create/destroy shares as money enters/leaves, so ΔSO x NAV ≈ net $
@@ -258,6 +288,13 @@ WATCHLIST = [
     "RAM",                        # Roundhill T-REX 2x Long DRAM ETF
     "AVGO", "NVDA", "MRVL", "LITE", "CAMT", "ONTO",  # semis / semi-cap
     "GOOGL", "MSFT",              # megacap AI-demand names off his list
+    # Added 2026-07-31 (Zach's call) so the biggest-orders board covers the
+    # names that actually dominate the mega-cap options tape. AMZN and MSFT
+    # calls owned the top of that leaderboard on the day it was built, and
+    # neither AMZN nor META nor AMD was on the desk at all. AAPL / TSLA / NFLX
+    # were considered in the same conversation and deliberately left off — he
+    # picked these three.
+    "AMZN", "META", "AMD",
     "CVX",                        # Chevron ("CHEV" on his TradingView list)
     "QQQ",                        # Nasdaq-100 (broad index, Zach's add 2026-07-17)
 ]
@@ -488,6 +525,7 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
     short_calls_prem_nm = short_puts_prem_nm = 0.0
     short_calls_oi = short_puts_oi = 0.0
     popular = None       # (premium, contract_dict)
+    big_candidates: list[tuple[float, dict]] = []    # (premium, row) biggest-orders board
     swing_candidates: list[tuple[float, dict]] = []  # (premium, contract) 0.30<=|delta|<=0.60
     swing_call_prem = swing_put_prem = 0.0
     swing_calls_vol = swing_puts_vol = 0.0
@@ -519,6 +557,33 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
 
         in_short = DTE_SHORT_LO <= dte <= DTE_SHORT_HI
         in_swing = DTE_SWING_LO <= dte <= DTE_SWING_HI
+        # Near-money gate, shared by FLOW %'s premium sums, the popular
+        # contract and the biggest-orders board. Fails CLOSED without a spot:
+        # with no reference price a stock-replacement strike is
+        # indistinguishable from a bet, so the contract is simply not counted.
+        near_money = bool(spot and spot > 0
+                          and abs(strike / spot - 1) <= MONEYNESS_BAND)
+
+        # ── biggest-orders board (added 2026-07-31) ─────────────────────
+        # Spans the union of both DTE buckets (0..BIG_ORDERS_DTE_HI) so the
+        # 8-13 day gap between them cannot hide a loud contract. Shortlisted
+        # per ticker here; run_cycle merges and re-ranks across the universe.
+        if (near_money and 0 <= dte <= BIG_ORDERS_DTE_HI
+                and premium >= BIG_ORDERS_MIN_PREMIUM):
+            big_candidates.append((premium, {
+                "ticker": ticker,
+                "side": "CALL" if cp == "C" else "PUT",
+                "strike": strike,
+                "expiry": expiry.isoformat(),
+                "dte": dte,
+                "last": last,
+                "volume": int(vol),
+                "open_interest": int(oi),
+                "delta": delta,
+                "iv": iv,
+                "premium": premium,
+                "occ": occ,
+            }))
 
         # ── aggressor tilt (both DTE buckets) ──────────────────────────
         # Cumulative volumes feed the next cycle's baseline; with a same-
@@ -557,7 +622,7 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
                 short_puts_prem += premium
                 short_puts_oi += oi
 
-            if spot and spot > 0 and abs(strike / spot - 1) <= MONEYNESS_BAND:
+            if near_money:
                 if cp == "C":
                     short_calls_prem_nm += premium
                 else:
@@ -659,6 +724,11 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
         c["rr"] = FIXED_RR
         suggested = c
 
+    # Biggest-orders shortlist: highest premium first, capped at the published
+    # row count (see BIG_ORDERS_CAP — the cap cannot alter the merged ranking).
+    big_candidates.sort(key=lambda x: x[0], reverse=True)
+    big_orders = [row for _, row in big_candidates[:BIG_ORDERS_CAP]]
+
     return {
         "spot": spot,
         "iv30": chain["iv30"],
@@ -676,6 +746,7 @@ def analyze_ticker(ticker: str, chain: dict, session_date: date,
         "sum_oi_0_7_directional": sum_oi_directional,
         "popular_contract": popular[1] if popular else None,
         "popular_premium": popular[0] if popular else 0.0,
+        "big_orders": big_orders,
         "total_premium_0_7": short_calls_prem + short_puts_prem,
         "has_short_bucket": sum_vol_0_7 > 0,
         "cp_skew": cp_skew,
@@ -898,9 +969,10 @@ def load_history(out_dir: Path) -> dict:
         raw.setdefault("sessions", {})
         raw.setdefault("iv_history", {})
         raw.setdefault("etf_so", {})
+        raw.setdefault("big_orders", {})
         return raw
     except Exception:
-        return {"sessions": {}, "iv_history": {}, "etf_so": {}}
+        return {"sessions": {}, "iv_history": {}, "etf_so": {}, "big_orders": {}}
 
 
 def save_history(out_dir: Path, history: dict) -> None:
@@ -915,6 +987,10 @@ def save_history(out_dir: Path, history: dict) -> None:
         if isinstance(rows, dict) and len(rows) > MAX_ETF_SO_SESSIONS:
             for k in sorted(rows.keys())[:-MAX_ETF_SO_SESSIONS]:
                 del rows[k]
+    big_hist = history.get("big_orders", {})
+    if isinstance(big_hist, dict) and len(big_hist) > MAX_BIG_ORDERS_SESSIONS:
+        for k in sorted(big_hist.keys())[:-MAX_BIG_ORDERS_SESSIONS]:
+            del big_hist[k]
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "history.json"
     tmp = path.with_suffix(".json.tmp")
@@ -1065,6 +1141,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
 
     conviction_cards = []
     swing_cards = []
+    big_orders_pool: list[dict] = []   # every ticker's shortlist, merged below
     with_options = 0
 
     for i, ticker in enumerate(candidates):
@@ -1086,6 +1163,12 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         net_flow = analysis["net_flow"]
         new_prev_cycle["flows"][ticker] = net_flow
         new_prev_cycle["vols"][ticker] = analysis["contract_vols"]
+
+        # Biggest-orders board: collect for EVERY candidate, not just the ones
+        # that make a scoring board — it is a universe-wide leaderboard, and a
+        # name can have the loudest contract of the day without scoring well.
+        for row in analysis["big_orders"]:
+            big_orders_pool.append({**row, "tv_symbol": quote["tv_symbol"]})
 
         # iv30 history
         if write_history and analysis["iv30"] is not None:
@@ -1357,6 +1440,22 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                                                 "score_conv": None})
         e.setdefault("direction", c["direction"])
 
+    # ── biggest-orders board: merge every ticker's shortlist, re-rank, cap ───
+    big_orders_pool.sort(key=lambda r: r["premium"], reverse=True)
+    big_orders = big_orders_pool[:BIG_ORDERS_CAP]
+    # Archived so the board is testable later. FLOW % shipped display-only with
+    # only aggregates stored, and when its accuracy was questioned not one
+    # historical day could be reconstructed — don't repeat that. Same weekend
+    # guard as the rest of history: a forced closed-market cycle refreshes
+    # data.json but must never create a session that did not happen.
+    if write_history:
+        big_hist = history.setdefault("big_orders", {})
+        # Later cycles overwrite today's row: volume is cumulative, so the
+        # last cycle of the session is the complete one.
+        big_hist[session_str] = [
+            {k: v for k, v in row.items() if k != "tv_symbol"} for row in big_orders
+        ]
+
     # ── semi ETF flows context card (fail-soft: null on any failure) ────────
     etf_flows = None
     try:
@@ -1388,6 +1487,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
             "high_conviction": high_conviction,
         },
         "etf_flows": etf_flows,
+        "big_orders": big_orders,
         "conviction": conviction_cards,
         "swing": swing_cards,
         "notes": {
@@ -1416,6 +1516,14 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                           "reading per session. Mixes retail and institutional money; "
                           "context only, never a scoring input. 1M flow comes straight "
                           "from TradingView."),
+            "big_orders": ("Biggest orders = the options contracts with the most dollars "
+                           "traded today across the whole watch list (volume x last x 100), "
+                           "strikes within 20% of the stock price, expiring inside 6 months. "
+                           "Each row is one contract's WHOLE SESSION, not a single order — "
+                           "free data publishes per-contract daily totals, not a trade-by-"
+                           "trade tape, so an individual block or sweep can't be seen here. "
+                           "As with net flow there is no buy/sell side: a big put row can be "
+                           "a hedge, a bearish bet, or someone selling puts. Display only."),
         },
     }
 

@@ -4,8 +4,9 @@
 
 Flow Desk is a personal, live options-flow dashboard. It watches the stock
 market during trading hours, looks for unusual options activity, and shows
-it on two simple boards. It uses only free data sources — there are no logins,
-no API keys to manage, and nothing to pay for.
+it on two scored boards plus a plain leaderboard of the day's biggest option
+trades. It uses only free data sources — there are no logins, no API keys to
+manage, and nothing to pay for.
 
 ## The URL
 
@@ -25,6 +26,8 @@ Open that link any time. It updates itself — there's nothing to install or run
 3. It scores each stock onto two boards:
    - **Conviction** — short-term activity, expiring in the next 0–7 days.
    - **Swing** — longer-term activity, expiring anywhere from 2 weeks to 6 months out.
+   It also ranks every name's individual contracts against each other for the
+   **Biggest orders today** board (below).
 4. The results are saved to a file called `data.json` and published to a
    separate branch of this repository (the `data` branch).
 5. The website reads that file to draw the boards, and separately checks
@@ -95,6 +98,46 @@ deep-in-the-money paper — LLY's read +$15.5M where the near-money figure was
 +$1.0M. Changing NET FLOW would change every score and every stored history
 row, so it's a separate decision, not folded into this one.
 
+## Biggest orders today (added 2026-07-31)
+
+Below the two scored boards is a plain ranked list: the individual option
+contracts with the **most money traded through them today**, across every name
+on the watch list. It's the same thing the "institutional options flow" posts
+circulating on social media show, built from the same free CBOE data they use.
+
+Read a line like this — `AMZN CALL $250  2026-08-21 (21d)   $122.22M` — as:
+*of everything traded today, more dollars went through Amazon's $250 calls
+expiring Aug 21 than any other single contract on the list.*
+
+**One line is one contract's whole day, NOT one order.** This is the honest
+limit and it's worth being clear about, because it's exactly where those posts
+oversell. Paid services ("a $6M sweep just hit NVDA") read a trade-by-trade
+tape and can point at a single order. Free CBOE data publishes a **daily total
+per contract** — every trade in that contract added together, from a hedge fund's
+block to somebody's single lottery ticket. So the numbers here are much bigger
+than a paid feed's, and they are a different measurement, not a better one.
+
+Two filters keep the list meaningful:
+
+- **Only strikes within 20% of the stock price.** Same reason FLOW % has that
+  rule (above): a deep-in-the-money option costs almost exactly what it's
+  already worth, so a few of those carry enormous "dollars" while betting on
+  nothing. Unfiltered, that paper would permanently own the top of this list.
+- **Only expiries inside 6 months**, and a minimum dollar size, so a quiet day
+  shows a short list instead of padding it with noise.
+
+**What it can't tell you:** which side traded. There's no buyer/seller
+information in free data, so a big put line might be a hedge on a stock someone
+owns, an outright bearish bet, or someone *selling* puts to collect income —
+which is bullish. Any post claiming a list like this proves institutions are
+"heavily bullish" or "hedging downside" is adding a story the data doesn't
+carry. This board is display only; no line here moves any score.
+
+**Amazon, Meta and AMD joined the watch list the same day**, so this board can
+see the mega-cap names that actually dominate that tape — AMZN and MSFT calls
+owned the top of it on day one, and none of the three had been on the desk
+before. Apple, Tesla and Netflix were considered and left off.
+
 ## The semi ETF flows card (added 2026-07-19)
 
 A small card near the top of the page shows whether real invested money went
@@ -129,6 +172,10 @@ was observed either.
   premium changed hands and in which direction the volume leaned. Treat it as
   a clue, not a fact. The AGGR TILT estimator above narrows this gap but is
   itself a sampled approximation, not the real tape.
+- **The biggest-orders board shows daily totals per contract, not single
+  orders.** Individual blocks and sweeps need a paid trade-by-trade feed. See
+  that section above — this is the difference that makes those social-media
+  "big flow" posts look like they're seeing something you can't.
 - **This is not financial advice.** It's a personal research tool. Nothing on
   the boards is a recommendation to buy or sell anything.
 
@@ -158,5 +205,7 @@ it ever stalls or you want to check on it:
   file on the `main` branch — it only lives on the `data` branch, since it's
   regenerated constantly and doesn't need a history of its own on `main`.
 - **`history.json`** — the fetcher's day-over-day memory (per-name flow, open
-  interest, IV history — what powers persistence, OI-confirm and IV rank). Like
-  `data.json` it lives only on the `data` branch, not on `main`.
+  interest, IV history, and each session's biggest-orders board — what powers
+  persistence, OI-confirm and IV rank, and what makes the biggest-orders board
+  checkable later). Like `data.json` it lives only on the `data` branch, not on
+  `main`.

@@ -52,6 +52,9 @@ string sentinel). All strings are already plain (frontend still escapes on rende
       }
     ]
   },
+  "big_orders": [ <BigOrder>, ... ],          // biggest-orders board (added 2026-07-31); cross-ticker,
+                                              // sorted premium desc, at most BIG_ORDERS_CAP rows.
+                                              // Empty array (never null) when nothing clears the floor.
   "conviction": [ <ConvictionCard>, ... ],   // 0-7 DTE board, sorted score desc
   "swing": [ <SwingCard>, ... ],              // 14d-6mo board, sorted score desc
   "notes": {
@@ -60,7 +63,8 @@ string sentinel). All strings are already plain (frontend still escapes on rende
     "tilt": "…methodology one-liner for the aggressor tilt (see build_snapshot.py header)…",
     "flow_pct": "…methodology one-liner for the premium-weighted put/call split…",
     "oi_confirm": "…methodology one-liner for OI-confirm…",
-    "etf_flows": "…methodology one-liner for the semi ETF flows card…"
+    "etf_flows": "…methodology one-liner for the semi ETF flows card…",
+    "big_orders": "…methodology one-liner for the biggest-orders board…"
   }
 }
 ```
@@ -73,6 +77,54 @@ string sentinel). All strings are already plain (frontend still escapes on rende
 > fetched for this card only — it is NOT part of the PINNED options universe.
 > The frontend must render nothing (no card) when `etf_flows` is null/absent
 > or `funds` is empty, so old snapshots keep working.
+
+> **Note on `big_orders` — it is a DAY TOTAL PER CONTRACT, not a single order.**
+> Each row is one options contract's whole session: `volume x last x 100`, the
+> same premium convention as `net_flow` and `flow_pct`. The free CBOE feed
+> publishes per-contract aggregates, not a trade-level tape, so an individual
+> block or sweep is **not observable here** and the field names deliberately
+> avoid implying one (`premium`, `volume` — never "order size"). Commercial
+> "big order" feeds rank single prints; ranking day totals is the closest
+> honest thing free data supports, and the site must keep saying so.
+> Two filters are load-bearing:
+> - **Near-money only** (`MONEYNESS_BAND`, ±20% of spot) — the same reason
+>   `flow_pct` carries it. Premium is intrinsic + extrinsic, so a deep-ITM
+>   strike costs nearly what it is already worth; a handful of those carry
+>   enormous dollars while betting on nothing (they are a way of holding the
+>   stock) and would permanently own the top of an unfiltered leaderboard.
+>   Unfiltered, LLY's 2026-07-27 chain put seven ~35%-ITM strikes at 79% of all
+>   call premium. **Do not widen this band to "show more names".**
+> - **A premium floor** (`BIG_ORDERS_MIN_PREMIUM`) so a quiet session publishes
+>   a short board rather than noise. A ticker with no spot is skipped entirely
+>   (fails closed — without spot, a stock-replacement strike is
+>   indistinguishable from a bet).
+>
+> DTE spans `0..BIG_ORDERS_DTE_HI` (183) on purpose: the two scoring boards
+> bucket 0-7 and 14-183, and this board must NOT inherit their 8-13 day blind
+> spot. Per-ticker shortlists are capped at `BIG_ORDERS_CAP` before the
+> cross-ticker merge — equal to the published row count, so the merge is exact
+> and one loud name can legitimately take several rows (no hidden per-ticker
+> quota). Display only: no row here moves any score.
+
+### BigOrder
+```json
+{
+  "ticker": "AMZN",
+  "tv_symbol": "NASDAQ:AMZN",       // exchange-prefixed, same as the cards
+  "side": "CALL",                   // "CALL" | "PUT"
+  "strike": 250.0,
+  "expiry": "2026-08-21",
+  "dte": 21,                        // calendar days from session_date
+  "last": 23.0,                     // last traded price of the contract
+  "volume": 54529,                  // contracts traded today (session total)
+  "open_interest": 41200,
+  "delta": 0.55,                    // null if CBOE omits it
+  "iv": 0.31,                       // decimal (0.31 = 31%); null if CBOE omits it
+  "premium": 125416670.0,           // volume x last x 100 — the ranking key.
+                                    // A SESSION TOTAL, not one order (see note above).
+  "occ": "AMZN260821C00250000"
+}
+```
 
 > **Note on `notes`:** the frontend does NOT render `notes.*` — it ships its
 > own tooltip copy (the `TIPS` object in `index.html`). The `notes` strings
@@ -212,6 +264,9 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "iv_history": { "MU": [0.91, 0.88, 0.98, ...] },  // per-name daily iv30, most-recent last, for IV rank
   "etf_so": {                                        // semi ETF shares-outstanding snapshots (etf_flows inputs)
     "SMH": { "2026-07-17": {"so": 120391874, "nav": 568.67}, ... }
+  },
+  "big_orders": {                                    // published biggest-orders board, one row-set per session
+    "2026-07-31": [ <BigOrder>, ... ]                // same shape as data.json's, minus tv_symbol
   }
 }
 ```
@@ -219,6 +274,15 @@ Keep max 60 sessions; prune older. `iv_history` keeps max 60 values/name.
 `etf_so` keeps max 60 sessions/fund; like the rest of history it is only
 written when the market is not closed (forced weekend runs must not create
 phantom flow sessions).
+
+`big_orders` keeps max 60 sessions and is **archived deliberately, not
+incidentally**: FLOW % shipped display-only with nothing stored but aggregates,
+and when its accuracy was finally questioned not one historical day could be
+reconstructed (see `market-data/results/flow_accuracy_2026-07.md`). Storing the
+board makes "did the loudest contract of the day lead price?" answerable after
+~30 sessions instead of unanswerable forever. Later cycles in a session
+OVERWRITE that session's row — the day total is cumulative, so the last cycle
+of the day is the complete one.
 On each cycle: reload history, update today's row (net_flow, sum_oi, iv30, direction,
 swing side vol/OI; tilt_*_prem ACCUMULATE across the day's cycles rather than being
 overwritten), set first_board_* only if not already set today, recompute
