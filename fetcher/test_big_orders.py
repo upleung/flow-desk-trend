@@ -212,3 +212,86 @@ def test_board_does_not_disturb_the_scoring_inputs():
     assert [r["strike"] for r in _big(a)] == [1190.0]
     assert a["net_flow"] == pytest.approx((640 * 409.0 - 500 * 20.0) * 100)
     assert a["direction"] == "BULL"
+
+
+# ── 5. the per-ticker cap and its disclosure (Zach's call, 2026-07-31) ────────
+# These live in run_cycle, so they are exercised through the same merge logic a
+# real cycle uses: build a pool of rows, apply the cap, check both the board and
+# the disclosure. The cap is only acceptable BECAUSE it is disclosed — a test
+# that checked the cap without checking the disclosure would bless half of it.
+
+def _merge(pool_rows):
+    """Mirror of run_cycle's merge/cap/disclose block."""
+    from build_snapshot import BIG_ORDERS_CAP as CAP, BIG_ORDERS_PER_TICKER as PER
+    pool = sorted(pool_rows, key=lambda r: r["premium"], reverse=True)
+    uncapped = pool[:CAP]
+    earned = {}
+    for r in uncapped:
+        earned[r["ticker"]] = earned.get(r["ticker"], 0) + 1
+    board, shown = [], {}
+    for r in pool:
+        if len(board) >= CAP:
+            break
+        if shown.get(r["ticker"], 0) >= PER:
+            continue
+        board.append(r)
+        shown[r["ticker"]] = shown.get(r["ticker"], 0) + 1
+    capped = [{"ticker": t, "shown": min(n, PER), "earned": n}
+              for t, n in sorted(earned.items(), key=lambda kv: -kv[1]) if n > PER]
+    return board, capped
+
+
+def _row(ticker, premium, strike=100.0):
+    return {"ticker": ticker, "premium": premium, "strike": strike, "side": "CALL"}
+
+
+def test_the_qqq_case_shows_three_rows_and_says_it_earned_five():
+    """The exact shape that prompted the cap: 0-DTE QQQ calls at adjacent
+    strikes holding 5 of the top 12 by dollars."""
+    pool = [_row("QQQ", 76e6 - i * 1e6, 683.0 + i) for i in range(5)]
+    pool += [_row(f"OTHER{i}", 20e6 - i * 1e5) for i in range(20)]
+    board, capped = _merge(pool)
+    assert sum(1 for r in board if r["ticker"] == "QQQ") == 3
+    assert capped == [{"ticker": "QQQ", "shown": 3, "earned": 5}]
+
+
+def test_the_cap_does_not_shorten_the_board():
+    """Rows a crowded name gives up go to the next-loudest OTHER contracts —
+    the board must still be full, or the cap would cost coverage."""
+    from build_snapshot import BIG_ORDERS_CAP
+    pool = [_row("QQQ", 90e6 - i, 683.0 + i) for i in range(9)]
+    pool += [_row(f"N{i}", 5e6 - i) for i in range(30)]
+    board, _ = _merge(pool)
+    assert len(board) == BIG_ORDERS_CAP
+    assert len({r["ticker"] for r in board}) >= 4     # breadth, which was the point
+
+
+def test_no_disclosure_when_the_cap_binds_nothing():
+    """Silence here is honest: nothing was held back, so there is nothing to
+    confess. An always-on note would train him to ignore it."""
+    pool = [_row(f"N{i}", 9e6 - i) for i in range(20)]
+    board, capped = _merge(pool)
+    assert capped == []
+    assert len(board) == 12
+
+
+def test_disclosure_counts_only_rows_that_would_have_made_the_board():
+    """'earned' is measured against the UNCAPPED top-12, not the ticker's whole
+    shortlist. A 13th-place row was never going to show, so counting it would
+    overstate what the cap cost and make the note untrustworthy."""
+    # QQQ has 6 rows, but only 4 of them out-rank the field into the top 12.
+    pool = [_row("QQQ", 50e6 - i, 683.0 + i) for i in range(4)]     # top-12 material
+    pool += [_row("QQQ", 1e5 + i, 700.0 + i) for i in range(2)]     # far down the pool
+    pool += [_row(f"N{i}", 40e6 - i * 1e6) for i in range(11)]
+    board, capped = _merge(pool)
+    assert capped == [{"ticker": "QQQ", "shown": 3, "earned": 4}]    # 4, not 6
+    assert sum(1 for r in board if r["ticker"] == "QQQ") == 3
+
+
+def test_two_crowded_names_are_both_disclosed_worst_first():
+    pool = [_row("QQQ", 90e6 - i, 683.0 + i) for i in range(5)]
+    pool += [_row("AMZN", 80e6 - i, 250.0 + i) for i in range(4)]
+    pool += [_row(f"N{i}", 1e6 - i) for i in range(10)]
+    _, capped = _merge(pool)
+    assert [c["ticker"] for c in capped] == ["QQQ", "AMZN"]
+    assert capped[0]["earned"] == 5 and capped[1]["earned"] == 4

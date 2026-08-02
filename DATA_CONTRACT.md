@@ -53,8 +53,16 @@ string sentinel). All strings are already plain (frontend still escapes on rende
     ]
   },
   "big_orders": [ <BigOrder>, ... ],          // biggest-orders board (added 2026-07-31); cross-ticker,
-                                              // sorted premium desc, at most BIG_ORDERS_CAP rows.
+                                              // sorted premium desc, at most BIG_ORDERS_CAP rows and at
+                                              // most BIG_ORDERS_PER_TICKER rows per ticker.
                                               // Empty array (never null) when nothing clears the floor.
+  "big_orders_capped": [                      // per-ticker cap disclosure; [] when the cap bound nothing.
+    {"ticker": "QQQ", "shown": 3, "earned": 5}  // "earned" = rows this ticker held in the UNCAPPED top
+                                              // BIG_ORDERS_CAP on dollars alone; "shown" = rows published.
+                                              // Sorted by earned desc. The frontend MUST render this —
+                                              // a bounded board that doesn't say what it dropped reads
+                                              // as "this is everything".
+  ],
   "conviction": [ <ConvictionCard>, ... ],   // 0-7 DTE board, sorted score desc
   "swing": [ <SwingCard>, ... ],              // 14d-6mo board, sorted score desc
   "notes": {
@@ -102,9 +110,18 @@ string sentinel). All strings are already plain (frontend still escapes on rende
 > DTE spans `0..BIG_ORDERS_DTE_HI` (183) on purpose: the two scoring boards
 > bucket 0-7 and 14-183, and this board must NOT inherit their 8-13 day blind
 > spot. Per-ticker shortlists are capped at `BIG_ORDERS_CAP` before the
-> cross-ticker merge — equal to the published row count, so the merge is exact
-> and one loud name can legitimately take several rows (no hidden per-ticker
-> quota). Display only: no row here moves any score.
+> cross-ticker merge — equal to the published row count, so the merge the cap is
+> applied to is exact. Display only: no row here moves any score.
+>
+> **`BIG_ORDERS_PER_TICKER` (3) caps rows per ticker, and the cap is DISCLOSED,
+> not silent (Zach's call 2026-07-31).** The first live cycle put 0-DTE QQQ
+> calls in 5 of 12 rows at adjacent strikes ($683-$687, same expiry) — an honest
+> ranking that crowded five other names off the board to say one thing five
+> times. Rows a capped ticker gives up go to the next-loudest OTHER contract, so
+> the board stays `BIG_ORDERS_CAP` long. `big_orders_capped` reports what the cap
+> cost, measured against the UNCAPPED top-`BIG_ORDERS_CAP` (not the ticker's
+> whole shortlist — a 13th-place row was never going to show, so counting it
+> would overstate the loss).
 
 ### BigOrder
 ```json
@@ -265,8 +282,11 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "etf_so": {                                        // semi ETF shares-outstanding snapshots (etf_flows inputs)
     "SMH": { "2026-07-17": {"so": 120391874, "nav": 568.67}, ... }
   },
-  "big_orders": {                                    // published biggest-orders board, one row-set per session
-    "2026-07-31": [ <BigOrder>, ... ]                // same shape as data.json's, minus tv_symbol
+  "big_orders": {                                    // published biggest-orders board, one entry per session
+    "2026-07-31": {
+      "rows": [ <BigOrder>, ... ],                   // same shape as data.json's, minus tv_symbol
+      "capped": [ {"ticker": "QQQ", "shown": 3, "earned": 5} ]  // the cap disclosure, archived with it
+    }
   }
 }
 ```

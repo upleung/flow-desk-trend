@@ -126,6 +126,15 @@ Two filters keep the list meaningful:
 - **Only expiries inside 6 months**, and a minimum dollar size, so a quiet day
   shows a short list instead of padding it with noise.
 
+**At most 3 rows per name.** On the first live cycle, 0-DTE QQQ calls held 5 of
+the 12 rows at strikes a dollar apart ($683 through $687, all expiring that
+afternoon) — an honest ranking that used up the board to say one thing five
+times. The cap frees those rows for the next-loudest *other* contracts, so you
+still get 12, just across more names. **The cap always says what it cost**: the
+line under the board names anything that earned more rows than it got ("AMZN
+earned 5 of these rows, showing 3"), because a trimmed list that doesn't admit
+it was trimmed reads like the whole picture.
+
 **What it can't tell you:** which side traded. There's no buyer/seller
 information in free data, so a big put line might be a hedge on a stock someone
 owns, an outright bearish bet, or someone *selling* puts to collect income —

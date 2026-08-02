@@ -229,9 +229,22 @@ OI_CONFIRM_CLOSE_ADJ = -10   # swing score penalty on CLOSING (directions matchi
 BIG_ORDERS_CAP = 12             # rows published, and the per-ticker shortlist size.
                                 # Equal on purpose: a ticker can supply at most
                                 # CAP rows to a CAP-row board, so shortlisting
-                                # per ticker cannot change the merged ranking —
-                                # no hidden per-ticker quota, and a genuinely
-                                # loud name may take several rows.
+                                # per ticker cannot change the ranking the cap
+                                # below is applied to.
+# Rows one ticker may occupy (Zach's call, 2026-07-31, after the first live
+# cycle put 0-DTE QQQ calls in 5 of 12 rows at adjacent strikes — $683/$684/
+# $685/$686/$687, same expiry). That ranking was honest but it crowded five
+# other names off the board to say one thing five times.
+#
+# THE CAP IS DISCLOSED, NEVER SILENT — this is the whole condition he attached
+# to it, and it is also the house rule (see the flows-accuracy work: a bounded
+# board that doesn't say what it dropped reads as "covered everything"). The
+# builder publishes big_orders_capped alongside the board: for each ticker, how
+# many of the top BIG_ORDERS_CAP rows by dollars it actually earned versus how
+# many are shown. The site renders that as a line under the board, so "QQQ owned
+# 5 of the top 12" stays visible even though only 3 rows do.
+BIG_ORDERS_PER_TICKER = 3       # one number to retune; 3 matches the reference
+                                # format (its NVDA appeared 3 times)
 BIG_ORDERS_MIN_PREMIUM = 100_000.0   # $ floor; a quiet session publishes a short
                                      # board rather than padding it with noise
 BIG_ORDERS_DTE_HI = 183         # 0..183 inclusive — the UNION of the two scoring
@@ -1442,7 +1455,35 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
 
     # ── biggest-orders board: merge every ticker's shortlist, re-rank, cap ───
     big_orders_pool.sort(key=lambda r: r["premium"], reverse=True)
-    big_orders = big_orders_pool[:BIG_ORDERS_CAP]
+    # The uncapped board is computed FIRST and is what the disclosure is measured
+    # against: "earned" means a row ranked inside the top BIG_ORDERS_CAP on
+    # dollars alone. Counting a ticker's whole shortlist instead would overstate
+    # what the cap held back (a 13th-place row was never going to show anyway).
+    uncapped = big_orders_pool[:BIG_ORDERS_CAP]
+    earned: dict[str, int] = {}
+    for row in uncapped:
+        earned[row["ticker"]] = earned.get(row["ticker"], 0) + 1
+    # Greedy fill in premium order, skipping a ticker once it hits its quota, so
+    # the rows a crowded name gives up go to the next-loudest OTHER contracts
+    # rather than shortening the board.
+    big_orders = []
+    shown: dict[str, int] = {}
+    for row in big_orders_pool:
+        if len(big_orders) >= BIG_ORDERS_CAP:
+            break
+        t = row["ticker"]
+        if shown.get(t, 0) >= BIG_ORDERS_PER_TICKER:
+            continue
+        big_orders.append(row)
+        shown[t] = shown.get(t, 0) + 1
+    big_orders_capped = [
+        {"ticker": t, "shown": min(n, BIG_ORDERS_PER_TICKER), "earned": n}
+        for t, n in sorted(earned.items(), key=lambda kv: -kv[1])
+        if n > BIG_ORDERS_PER_TICKER
+    ]
+    if big_orders_capped:
+        log("big-orders per-ticker cap applied: "
+            + ", ".join(f"{c['ticker']} {c['shown']}/{c['earned']}" for c in big_orders_capped))
     # Archived so the board is testable later. FLOW % shipped display-only with
     # only aggregates stored, and when its accuracy was questioned not one
     # historical day could be reconstructed — don't repeat that. Same weekend
@@ -1452,9 +1493,10 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         big_hist = history.setdefault("big_orders", {})
         # Later cycles overwrite today's row: volume is cumulative, so the
         # last cycle of the session is the complete one.
-        big_hist[session_str] = [
-            {k: v for k, v in row.items() if k != "tv_symbol"} for row in big_orders
-        ]
+        big_hist[session_str] = {
+            "rows": [{k: v for k, v in row.items() if k != "tv_symbol"} for row in big_orders],
+            "capped": big_orders_capped,
+        }
 
     # ── semi ETF flows context card (fail-soft: null on any failure) ────────
     etf_flows = None
@@ -1488,6 +1530,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
         },
         "etf_flows": etf_flows,
         "big_orders": big_orders,
+        "big_orders_capped": big_orders_capped,
         "conviction": conviction_cards,
         "swing": swing_cards,
         "notes": {
@@ -1523,7 +1566,10 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                            "free data publishes per-contract daily totals, not a trade-by-"
                            "trade tape, so an individual block or sweep can't be seen here. "
                            "As with net flow there is no buy/sell side: a big put row can be "
-                           "a hedge, a bearish bet, or someone selling puts. Display only."),
+                           "a hedge, a bearish bet, or someone selling puts. At most "
+                           f"{BIG_ORDERS_PER_TICKER} rows per ticker, so one busy name can't "
+                           "say the same thing five times; any name that earned more rows "
+                           "than it got is listed under the board. Display only."),
         },
     }
 
