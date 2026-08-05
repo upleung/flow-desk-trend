@@ -140,7 +140,7 @@ def test_premium_floor_keeps_a_quiet_session_honest():
 # ── 3. DTE coverage and failing closed ───────────────────────────────────────
 
 def test_the_8_to_13_day_gap_between_the_scoring_boards_is_covered():
-    """0-7 DTE and 14-183 DTE leave 8-13 uncovered on the scored boards. This
+    """0-7 DTE and 120-365 DTE leave 8-13 uncovered on the scored boards. This
     board must NOT inherit that hole — a loud 10-day contract is still loud."""
     spot = 100.0
     ten_days = "260806"                     # SESSION + 10

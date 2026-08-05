@@ -107,8 +107,8 @@ string sentinel). All strings are already plain (frontend still escapes on rende
 >   (fails closed — without spot, a stock-replacement strike is
 >   indistinguishable from a bet).
 >
-> DTE spans `0..BIG_ORDERS_DTE_HI` (183) on purpose: the two scoring boards
-> bucket 0-7 and 14-183, and this board must NOT inherit their 8-13 day blind
+> DTE spans `0..BIG_ORDERS_DTE_HI` (365) on purpose: the two scoring boards
+> bucket 0-7 and 120-365, and this board must NOT inherit their 8-13 day blind
 > spot. Per-ticker shortlists are capped at `BIG_ORDERS_CAP` before the
 > cross-ticker merge — equal to the published row count, so the merge the cap is
 > applied to is exact. Display only: no row here moves any score.
@@ -218,7 +218,7 @@ string sentinel). All strings are already plain (frontend still escapes on rende
   "flow_5d_pct": 62.0,             // flow_5d as % of gross premium (calls+puts) over the same sessions; signed, -100..+100; null if no gross history
   "oi_build": 12000,               // day-over-day sum-OI delta in the flow direction (contracts); null if <2 days history
   "oi_confirm": "OPENING",         // "OPENING" | "CLOSING" | "CHURN" | null — did yesterday's
-                                   // swing-bucket (14-183d) volume become held OI (+/-25% of
+                                   // swing-bucket (120-365d) volume become held OI (+/-25% of
                                    // yesterday's side volume)? null if <2 days of side data or
                                    // yesterday's side volume < 500
   "oi_confirm_frac": 0.41,         // (OI_today - OI_yest) / vol_yest on yesterday's direction side; null when oi_confirm is null
@@ -269,7 +269,7 @@ string sentinel). All strings are already plain (frontend still escapes on rende
         "direction": "BULL",
         "tilt_bull_prem": 2100000.0, // day-accumulated classified bullish premium (calls bought + puts sold)
         "tilt_bear_prem": 850000.0,  // day-accumulated classified bearish premium (calls sold + puts bought)
-        "swing_vol_c": 41000,        // swing-bucket (14-183d) call volume   — OI-confirm inputs
+        "swing_vol_c": 41000,        // swing-bucket (120-365d) call volume   — OI-confirm inputs
         "swing_vol_p": 28000,        // swing-bucket put volume
         "swing_oi_c": 910000,        // swing-bucket call OI
         "swing_oi_p": 640000,        // swing-bucket put OI

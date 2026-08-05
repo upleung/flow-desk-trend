@@ -27,7 +27,7 @@ PIPELINE (letters match the build spec)
     chars from the end) into two DTE buckets:
       0-7 DTE  -> net_flow, cp_ratio, aggregate vol/OI, popular_contract,
                   conviction score (see WEIGHTS_CONVICTION below).
-      14-183d  -> cp_skew, suggested_contract (0.30<=|delta|<=0.60, highest
+      120-365d  -> cp_skew, suggested_contract (0.30<=|delta|<=0.60, highest
                   premium), entry/stop/target/rr, earnings-in-window.
 (e) Swing metrics pulled from history.json: persist (n/5 same-direction
     sessions), flow_5d, oi_build, trend (spot vs SMA20/SMA50), iv_rank
@@ -106,7 +106,7 @@ OI-CONFIRM (added 2026-07-18, same approval)
 ────────────────────────────────────────────────────────────────────────────
 Did yesterday's flow OPEN new positions or just churn/close? Compare today's
 open interest against yesterday's, normalized by yesterday's volume, on the
-SWING bucket (14-183d — the 0-7DTE bucket is polluted by weekly expirations),
+SWING bucket (120-365d — the 0-7DTE bucket is polluted by weekly expirations),
 on the side (calls/puts) of YESTERDAY'S direction:
   frac = (oi_today_side - oi_yesterday_side) / yesterday_vol_side
   frac >= +0.25 -> "OPENING"   (yesterday's volume became held positions)
@@ -190,7 +190,7 @@ ACCEL_MULT = 1.5             # net_flow acceleration threshold for "firing"
 MONEYNESS_BAND = 0.20        # +/-20% of spot for 0-7DTE popular_contract
 SWING_DELTA_LO, SWING_DELTA_HI = 0.30, 0.60
 DTE_SHORT_LO, DTE_SHORT_HI = 0, 7
-DTE_SWING_LO, DTE_SWING_HI = 14, 183
+DTE_SWING_LO, DTE_SWING_HI = 120, 365
 
 STOP_MULT = 0.70
 TARGET_MULT = 2.05
@@ -247,8 +247,8 @@ BIG_ORDERS_PER_TICKER = 3       # one number to retune; 3 matches the reference
                                 # format (its NVDA appeared 3 times)
 BIG_ORDERS_MIN_PREMIUM = 100_000.0   # $ floor; a quiet session publishes a short
                                      # board rather than padding it with noise
-BIG_ORDERS_DTE_HI = 183         # 0..183 inclusive — the UNION of the two scoring
-                                # buckets (0-7 and 14-183), so this board does not
+BIG_ORDERS_DTE_HI = 365         # 0..365 inclusive — the UNION of the two scoring
+                                # buckets (0-7 and 120-365), so this board does not
                                 # inherit their 8-13 day blind spot
 MAX_BIG_ORDERS_SESSIONS = 60    # history cap, same horizon as sessions/iv_history
 
@@ -507,7 +507,7 @@ def _num(v) -> float | None:
 
 def analyze_ticker(ticker: str, chain: dict, session_date: date,
                    prev_vols: dict | None = None) -> dict:
-    """Bucket a chain's contracts into 0-7DTE and 14-183d groups + metrics.
+    """Bucket a chain's contracts into 0-7DTE and 120-365d groups + metrics.
 
     prev_vols: {occ: cumulative volume at the previous cycle}, SAME session
     only (caller enforces) — enables the aggressor-tilt classification of
