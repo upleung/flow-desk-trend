@@ -9,8 +9,8 @@ trades. It uses only free data sources — there are no logins, no API keys to
 manage, and nothing to pay for.
 
 ## The URL
-
-**[DEMO](https://upleung.github.io/flow-desk-trend/)**
+**[DEMO1](https://zlanghamer1.github.io/flow-desk/)**
+**[DEMO2](https://upleung.github.io/flow-desk-trend/)**
 
 Open that link any time. It updates itself — there's nothing to install or run.
 
