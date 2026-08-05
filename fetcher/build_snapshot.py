@@ -262,7 +262,7 @@ MAX_BIG_ORDERS_SESSIONS = 60    # history cap, same horizon as sessions/iv_histo
 # SOXX is fetched for this card only; it is NOT part of the PINNED options
 # universe (the card tracks the biggest semi ETF even though Zach's options
 # watchlist uses SMH/SOXL/SOXS).
-ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM", "DIA", "SPY", "QQQ", "TQQQ"]
+ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM", "DIA", "SPY", "QQQ", "TQQQ", "MAGS"]
 ETF_FLOW_COLUMNS = ["name", "shares_outstanding", "nav", "aum", "fund_flows.1M"]
 MAX_ETF_SO_SESSIONS = 60     # history cap, same horizon as sessions/iv_history
 
