@@ -262,7 +262,7 @@ MAX_BIG_ORDERS_SESSIONS = 60    # history cap, same horizon as sessions/iv_histo
 # SOXX is fetched for this card only; it is NOT part of the PINNED options
 # universe (the card tracks the biggest semi ETF even though Zach's options
 # watchlist uses SMH/SOXL/SOXS).
-ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM"，"DIA","SPY""QQQ","TQQQ"]
+ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM", "DIA", "SPY", "QQQ", "TQQQ"]
 ETF_FLOW_COLUMNS = ["name", "shares_outstanding", "nav", "aum", "fund_flows.1M"]
 MAX_ETF_SO_SESSIONS = 60     # history cap, same horizon as sessions/iv_history
 
@@ -290,10 +290,10 @@ WATCHLIST = [
     "AVGO", "BRK.B", "CRWV", "DELL", "GOOG",
     "INTC", "KO", "META", "MRVL", "MSFT",
     "MU", "NET", "NVDA", "ORCL", "QCOM",
-    "SKHY", "SNDK", "SPCX", "TSLA","TSM"
+    "SKHY", "SNDK", "SPCX", "TSLA","TSM",
     "QQQ", "SMH", "SOXL", "SOXX", "TQQQ",
     # 你补充的 5 只（NFLX 已在 PDF 中，不重复）
-    "DPZ", "MCD", "NEK", "NFLX","WMT", "NVO",,
+    "DPZ", "MCD", "NEK", "NFLX","WMT", "NVO",
     
 ]
 
