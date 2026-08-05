@@ -1,27 +1,12 @@
 name: Deploy Pages
 
-# Publishes the static site (just index.html) to GitHub Pages at
-# https://zlanghamer1.github.io/flow-desk/. The page itself fetches
-# data.json live from the `data` branch's raw content at runtime, so this
-# workflow only ever needs to ship index.html — nothing from fetcher/ or
-# .github/ should end up in the deployed site.
-#
-# HOW IT DEPLOYS (changed 2026-07-16 during first deploy): Pages runs in
-# branch mode from `gh-pages` — this job just copies index.html from main
-# onto that branch, and GitHub's own "pages build and deployment" publishes
-# it. The original actions/deploy-pages route was abandoned because the
-# workflow token can't create a Pages site ("Resource not accessible by
-# integration"), and after Pages was branch-enabled, the auto-created
-# github-pages environment only accepts deployments from gh-pages, which
-# rejected deploy-pages runs from main. Branch mode needs neither admin
-# rights nor environment approval, so it can never wedge like that again.
-
 on:
   push:
     branches: [main]
     paths:
       - index.html
       - .github/workflows/pages.yml
+
   workflow_dispatch: {}
 
 permissions:
@@ -34,6 +19,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout main
         uses: actions/checkout@v5
@@ -41,13 +27,30 @@ jobs:
       - name: Sync index.html to gh-pages
         run: |
           set -euo pipefail
+
           git config user.name "flow-desk-bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin gh-pages
-          git checkout gh-pages
+
+          # 检查 gh-pages 是否存在
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            echo "gh-pages exists — fetching"
+            git fetch origin gh-pages
+            git checkout gh-pages
+          else
+            echo "gh-pages does not exist — creating orphan branch"
+            git checkout --orphan gh-pages
+            git rm -rf .
+            touch .nojekyll
+            git add .nojekyll
+            git commit -m "Initialize gh-pages branch"
+            git push origin gh-pages
+          fi
+
+          # 从 main 复制 index.html
           git checkout main -- index.html
           touch .nojekyll
           git add index.html .nojekyll
+
           if git diff --cached --quiet; then
             echo "Site unchanged — nothing to publish."
           else
