@@ -299,12 +299,12 @@ WATCHLIST = [
 
 # 11 SPDR sector-index ETFs ("sector indexes like xle, xlc, xlp etc.")
 SECTOR_ETFS = [
-    #"XLE", "XLC", "XLP", "XLF", "XLK",
-    #"XLV", "XLI", "XLY", "XLB", "XLU", "XLRE",
+    "XLE", "XLC", "XLP", "XLF", "XLK",
+    "XLV", "XLI", "XLY", "XLB", "XLU", "XLRE",
 ]
 
 # The full pinned universe — deduped, order-preserving.
-PINNED = list(dict.fromkeys(WATCHLIST + SECTOR_ETFS))
+PINNED = list(dict.fromkeys(WATCHLIST))
 
 TV_COLUMNS = [
     "name", "close", "change", "change_from_open",
@@ -1589,7 +1589,7 @@ def _print_summary(data: dict) -> None:
 
 def main() -> int:
     args = sys.argv[1:]
-    dry_run = "--dry-run" in args
+    dry_run = False
     out_dir_env = os.environ.get("OUT_DIR")
     out_dir = Path(out_dir_env) if out_dir_env else DEFAULT_OUT_DIR
     try:
