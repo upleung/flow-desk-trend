@@ -262,7 +262,7 @@ MAX_BIG_ORDERS_SESSIONS = 60    # history cap, same horizon as sessions/iv_histo
 # SOXX is fetched for this card only; it is NOT part of the PINNED options
 # universe (the card tracks the biggest semi ETF even though Zach's options
 # watchlist uses SMH/SOXL/SOXS).
-ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM"]
+ETF_FLOW_FUNDS = ["SMH", "SOXX", "SOXL", "SOXS", "DRAM"，"DIA","SPY""QQQ","TQQQ"]
 ETF_FLOW_COLUMNS = ["name", "shares_outstanding", "nav", "aum", "fund_flows.1M"]
 MAX_ETF_SO_SESSIONS = 60     # history cap, same horizon as sessions/iv_history
 
@@ -285,37 +285,22 @@ MAX_ETF_SO_SESSIONS = 60     # history cap, same horizon as sessions/iv_history
 #   SPMO           — broad-market momentum ETF, left off to keep the board lean
 #   (QQQ was added back 2026-07-17 at Zach's request — it's below.)
 WATCHLIST = [
-    # Zach's canonical picks (vault, 2026-06-10)
-    "MU", "CRWD", "COHR", "LLY", "V", "XOM",
-    # Semiconductor / memory cluster off his TradingView watchlist
-    "SMH", "SOXL", "SOXS",        # semi ETFs (broad + 3x bull/bear)
-    "MUU",                        # Direxion 2x Long MU
-    # SK Hynix: the sponsored ADR, NOT the 2x ETF. Swapped 2026-07-25 —
-    # SKHX (Leverage Shares 2x Long SK Hynix) carried 352 contracts / 195
-    # total volume on the Cboe chain versus SKHY's 2,600 / 167k, so the
-    # leveraged wrapper was scoring noise while the liquid SK Hynix options
-    # venue sat off the board.
-    "SKHY",                       # SK hynix Inc. sponsored ADR (NASDAQ)
-    "SNDK",                       # Sandisk
-    "DRAM",                       # Roundhill Memory ETF
-    "RAM",                        # Roundhill T-REX 2x Long DRAM ETF
-    "AVGO", "NVDA", "MRVL", "LITE", "CAMT", "ONTO",  # semis / semi-cap
-    "GOOGL", "MSFT",              # megacap AI-demand names off his list
-    # Added 2026-07-31 (Zach's call) so the biggest-orders board covers the
-    # names that actually dominate the mega-cap options tape. AMZN and MSFT
-    # calls owned the top of that leaderboard on the day it was built, and
-    # neither AMZN nor META nor AMD was on the desk at all. AAPL / TSLA / NFLX
-    # were considered in the same conversation and deliberately left off — he
-    # picked these three.
-    "AMZN", "META", "AMD",
-    "CVX",                        # Chevron ("CHEV" on his TradingView list)
-    "QQQ",                        # Nasdaq-100 (broad index, Zach's add 2026-07-17)
+    
+    "AAPL", "AMD", "AMZN", "ARM", "ASML",
+    "AVGO", "BRK.B", "CRWV", "DELL", "GOOG",
+    "INTC", "KO", "META", "MRVL", "MSFT",
+    "MU", "NET", "NVDA", "ORCL", "QCOM",
+    "SKHY", "SNDK", "SPCX", "TSLA","TSM"
+    "QQQ", "SMH", "SOXL", "SOXX", "TQQQ",
+    # 你补充的 5 只（NFLX 已在 PDF 中，不重复）
+    "DPZ", "MCD", "NEK", "NFLX","WMT", "NVO",,
+    
 ]
 
 # 11 SPDR sector-index ETFs ("sector indexes like xle, xlc, xlp etc.")
 SECTOR_ETFS = [
-    "XLE", "XLC", "XLP", "XLF", "XLK",
-    "XLV", "XLI", "XLY", "XLB", "XLU", "XLRE",
+    #"XLE", "XLC", "XLP", "XLF", "XLK",
+    #"XLV", "XLI", "XLY", "XLB", "XLU", "XLRE",
 ]
 
 # The full pinned universe — deduped, order-preserving.
