@@ -10,7 +10,7 @@ manage, and nothing to pay for.
 
 ## The URL
 
-**https://github.com/upleung/flow-desk-trend**
+**[DEMO](https://upleung.github.io/flow-desk-trend/)**
 
 Open that link any time. It updates itself — there's nothing to install or run.
 
