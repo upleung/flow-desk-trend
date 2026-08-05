@@ -10,7 +10,7 @@ manage, and nothing to pay for.
 
 ## The URL
 
-**https://zlanghamer1.github.io/flow-desk/**
+**[https:/.github.io/flow-desk/](https://upleung.github.io/flow-desk-trend/)**
 
 Open that link any time. It updates itself — there's nothing to install or run.
 
