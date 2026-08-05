@@ -1546,7 +1546,7 @@ def run_cycle(out_dir: Path, dry_run: bool = False) -> dict:
                           "from TradingView."),
             "big_orders": ("Biggest orders = the options contracts with the most dollars "
                            "traded today across the whole watch list (volume x last x 100), "
-                           "strikes within 20% of the stock price, expiring inside 6 months. "
+                           "strikes within 20% of the stock price, expiring inside 12 months. "
                            "Each row is one contract's WHOLE SESSION, not a single order — "
                            "free data publishes per-contract daily totals, not a trade-by-"
                            "trade tape, so an individual block or sweep can't be seen here. "
