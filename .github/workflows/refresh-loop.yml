@@ -74,6 +74,7 @@ jobs:
         id: loop
         env:
           OUT_DIR: ${{ env.OUT_DIR }}
+          LOOP_SLEEP_SEC: 3600
           FORCE_ONE_CYCLE: ${{ inputs.force && '1' || '0' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -44,7 +44,7 @@ import build_snapshot
 ROOT = Path(__file__).resolve().parent
 DEFAULT_OUT_DIR = ROOT.parent / "data"
 
-LOOP_SLEEP_SEC = int(os.environ.get("LOOP_SLEEP_SEC", "420"))
+LOOP_SLEEP_SEC = int(os.environ.get("LOOP_SLEEP_SEC", "3600"))
 MAX_RUN_SEC = int(os.environ.get("MAX_RUN_SEC", str(19800)))  # 5.5h
 GIT_RETRIES = 3
 GIT_RETRY_BACKOFF_SEC = 5
