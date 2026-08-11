@@ -1,0 +1,67 @@
+name: Refresh Loop
+
+# 修改为纯定时触发模式，避免长时间占用 Runner
+on:
+  workflow_dispatch:
+  schedule:
+    # 美东时间（EST）交易日 9:30 - 16:00
+    # 对应的 UTC 时间是 13:30 - 20:00 (夏令时) 或 14:30 - 21:00 (冬令时)
+    # 为了涵盖夏令时和冬令时的整个交易时段，我们将运行时间定为 UTC 13点到21点，每小时的第30分钟执行
+    - cron: "30 13-21 * * 1-5" 
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-loop
+  cancel-in-progress: false
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # 既然只运行一次，超时时间设为10分钟即可
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "flow-desk-bot"
+          git config user.email "actions@github.com"
+
+      - name: Prepare OUT_DIR (data branch working copy)
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OUT_DIR="${GITHUB_WORKSPACE}/_data-branch"
+          REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+          if git ls-remote --exit-code --heads "$REMOTE_URL" data >/dev/null 2>&1; then
+            git clone --branch data --single-branch "$REMOTE_URL" "$OUT_DIR"
+          else
+            git clone "$REMOTE_URL" "$OUT_DIR"
+            (
+              cd "$OUT_DIR"
+              git checkout --orphan data
+              git rm -rf . >/dev/null 2>&1 || true
+              git commit --allow-empty -m "Initialize data branch"
+              git push "$REMOTE_URL" data
+            )
+          fi
+          git -C "$OUT_DIR" config user.name "flow-desk-bot"
+          git -C "$OUT_DIR" config user.email "actions@github.com"
+          echo "OUT_DIR=$OUT_DIR" >> "$GITHUB_ENV"
+
+      - name: Run one cycle
+        env:
+          OUT_DIR: ${{ env.OUT_DIR }}
+          # 关键修改：强制设置为 1，让 loop.py 执行一次后立即退出
+          FORCE_ONE_CYCLE: '1' 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 fetcher/loop.py
