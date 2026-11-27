@@ -1,0 +1,157 @@
+{
+  "generated_at": "2026-11-27T22:12:30Z",
+  "generated_at_ct": "2026-11-27 16:12 CT",
+  "session_date": "2026-11-27",
+  "market_state": "closed",
+  "universe": {
+    "watched": 36,
+    "candidates": 34,
+    "with_options": 0,
+    "pinned": 36
+  },
+  "stats": {
+    "bullish_flow": 0,
+    "bearish_flow": 0,
+    "firing": 0,
+    "high_conviction": 0
+  },
+  "etf_flows": {
+    "as_of_session": "2026-11-27",
+    "flow_session": "2026-11-13",
+    "funds": [
+      {
+        "ticker": "SMH",
+        "flow_1d": 2049883055.0,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": 4210574415.0,
+        "aum": 56903904954.482,
+        "so": 133141874.0,
+        "nav": 422.6563,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "SOXX",
+        "flow_1d": -3538774411.2,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": -3222419730.3755627,
+        "aum": 33576492732.3,
+        "so": 261050000.0,
+        "nav": 127.984608,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "SOXL",
+        "flow_1d": 4109194599.9999995,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": 4371473100.0,
+        "aum": 12932276954.5,
+        "so": 397000060.0,
+        "nav": 32.053,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "SOXS",
+        "flow_1d": -444115100.0,
+        "baseline_session": "2026-11-13",
+        "streak": 2,
+        "flow_1m": -4712156600.0,
+        "aum": 1428549203.904,
+        "so": 23368272.0,
+        "nav": 62.114,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "DRAM",
+        "flow_1d": -1057731639.9999999,
+        "baseline_session": "2026-11-13",
+        "streak": 5,
+        "flow_1m": -1886596476.0,
+        "aum": 12817111014.0,
+        "so": 340380000.0,
+        "nav": 34.657,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "DIA",
+        "flow_1d": 476234472.75,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": 261583328.60000423,
+        "aum": 44066818599.84,
+        "so": 88192867.0,
+        "nav": 501.299445,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "SPY",
+        "flow_1d": 2866820124.0,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": 4061644417.7000017,
+        "aum": 764916664787.851,
+        "so": 1064582116.0,
+        "nav": 716.705031,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "QQQ",
+        "flow_1d": 5261486200.0,
+        "baseline_session": "2026-11-13",
+        "streak": 2,
+        "flow_1m": 20693304850.0,
+        "aum": 446531002650.0,
+        "so": 699950000.0,
+        "nav": 633.914,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "TQQQ",
+        "flow_1d": 2303474410.0,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": 5398470505.0,
+        "aum": 28257866380.0,
+        "so": 612200000.0,
+        "nav": 45.2549,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      },
+      {
+        "ticker": "MAGS",
+        "flow_1d": -65071900.0,
+        "baseline_session": "2026-11-13",
+        "streak": 1,
+        "flow_1m": -402544057.0,
+        "aum": 4679261956.0,
+        "so": 71140000.0,
+        "nav": 65.0719,
+        "split_suppressed": false,
+        "flow_session": "2026-11-13"
+      }
+    ]
+  },
+  "big_orders": [],
+  "big_orders_capped": [],
+  "conviction": [],
+  "swing": [],
+  "notes": {
+    "flow_proxy": "Net flow = call premium traded minus put premium traded (volume x last x 100). Free data can't see buy/sell side \u2014 this is premium changing hands, not directional order flow.",
+    "delay": "Options data is 15-minute delayed (CBOE free feed). Stock prices update live every 30s (TradingView Cboe One).",
+    "tilt": "Aggressor tilt classifies each contract's last trade against its bid/ask each refresh (near ask = bought, near bid = sold) and accumulates the day's classified premium: calls bought + puts sold = bullish, calls sold + puts bought = bearish. It samples one trade per contract per ~7-min cycle \u2014 a sampled proxy, not the full tape.",
+    "flow_pct": "Flow % is the premium-weighted put/call split for 0-7 DTE: whichever side holds the larger share of the dollars traded, shown as a percentage. C/P counts contracts, Flow % counts dollars \u2014 they disagree when one side's options are far more expensive, which is how a put-heavy day can hide behind a balanced contract ratio. Display only, not a scoring input.",
+    "oi_confirm": "OI-confirm checks whether yesterday's 2wk-6mo flow became held positions: open interest up >=25% of yesterday's volume = OPENING, down >=25% = CLOSING, else CHURN.",
+    "etf_flows": "Semi ETF flows = day-over-day change in each fund's shares outstanding x NAV \u2014 real money entering or leaving the fund wrapper (ETFs create/destroy shares as money moves), one reading per session. Mixes retail and institutional money; context only, never a scoring input. 1M flow comes straight from TradingView.",
+    "big_orders": "Biggest orders = the options contracts with the most dollars traded today across the whole watch list (volume x last x 100), strikes within 20% of the stock price, expiring inside 12 months. Each row is one contract's WHOLE SESSION, not a single order \u2014 free data publishes per-contract daily totals, not a trade-by-trade tape, so an individual block or sweep can't be seen here. As with net flow there is no buy/sell side: a big put row can be a hedge, a bearish bet, or someone selling puts. At most 3 rows per ticker, so one busy name can't say the same thing five times; any name that earned more rows than it got is listed under the board. Display only."
+  }
+}
